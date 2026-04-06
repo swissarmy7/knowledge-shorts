@@ -30,7 +30,6 @@ output/
 temp/
 tmp/
 assets/
-*.mp3
 *.png
 *.mp4
 test_out*.json
