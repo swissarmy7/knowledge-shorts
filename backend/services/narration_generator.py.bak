@@ -1,0 +1,332 @@
+"""
+Narration Generator Service
+Uses Google Cloud TTS API to generate high-quality, fine-tuned narration for each scene.
+"""
+import io
+import re
+import subprocess
+import hashlib
+import logging
+from pathlib import Path
+from backend.services.google_tts_service import generate_google_tts
+
+logger = logging.getLogger("shorts")
+
+# Google Cloud TTS Voice & Parameter Mapping (ko-KR)
+VOICE_POOL = {
+    "male": {
+        "teacher": {
+            "name": "ko-KR-Neural2-C",
+            "pitch": -3.0,       # 고급스럽고 신뢰감 있는 톤
+            "rate": 1.10         # 자연스러운 속도
+        },
+        "student": {
+            "name": "ko-KR-Neural2-C",
+            "pitch": 0.0,        # 피치 조작 없이 속도로 에너지 부여
+            "rate": 1.18         # 활기찬 페이스
+        },
+        "child": {
+            "name": "ko-KR-Neural2-B",
+            "pitch": 2.5,
+            "rate": 1.15
+        }
+    },
+    "female": {
+        "teacher": {
+            "name": "ko-KR-Neural2-B",  # 자연스러움 특화 프리미엄 모델 대체
+            "pitch": 0.0,
+            "rate": 1.05
+        },
+        "student": {
+            "name": "ko-KR-Neural2-A",
+            "pitch": 1.0,        # 약간의 피치 상승으로 생기 부여
+            "rate": 1.18
+        },
+        "child": {
+            "name": "ko-KR-Neural2-A",
+            "pitch": 3.0,
+            "rate": 1.15
+        }
+    },
+    "mascot": {
+        "name": "ko-KR-Neural2-A",
+        "pitch": 3.5,           # 귀엽고 통통 튀는 목소리
+        "rate": 1.20
+    }
+}
+
+def _get_google_voice_settings(char_id: str, gender: str, role: str, age_group: str = "young-adult") -> dict:
+    """Select the best Google Cloud TTS voice and fine-tuning parameters."""
+    
+    # 1. Special Case: Mascot/Cat
+    if char_id == "char_cat":
+        return VOICE_POOL["mascot"]
+
+    # 2. Extract Gender Key
+    gender_input = str(gender).lower()
+    if "female" in gender_input:
+        gender_key = "female"
+    elif "male" in gender_input:
+        gender_key = "male"
+    else:
+        gender_key = "female" # default
+
+    # 3. Extract Role/Age Key
+    role_input = str(role).lower()
+    age_input = str(age_group).lower()
+    
+    if age_input == "child":
+        role_key = "child"
+    elif "teacher" in char_id or any(kw in role_input for kw in ["teacher", "professor", "doctor", "expert"]):
+        role_key = "teacher"
+    elif "student" in char_id or any(kw in role_input for kw in ["student", "pupil"]):
+        role_key = "student"
+    else:
+        # Fallback based on age_group if role is ambiguous
+        if age_input in ["elder", "middle-aged"]:
+            role_key = "teacher"
+        else:
+            role_key = "student"
+
+    # 4. Final selection
+    settings = VOICE_POOL[gender_key].get(role_key, VOICE_POOL[gender_key]["student"])
+    
+    logger.info(f"[VoiceSelection] Char:{char_id} | Gender:{gender} | Role:{role} | Age:{age_group} -> Voice:{settings['name']}")
+    return settings
+
+
+async def generate_narration(
+    text: str,
+    scene_id: int,
+    job_dir: Path,
+    character_id: str = "char_1",
+    gender: str = "female",
+    role: str = "student",
+    age_group: str = "young-adult",
+) -> dict:
+    """Generate fine-tuned TTS narration using Google Cloud TTS parameters."""
+    audio_dir = job_dir / "audio"
+    audio_dir.mkdir(exist_ok=True)
+
+    # Get Voice Settings (Name, Pitch, Rate)
+    v_settings = _get_google_voice_settings(character_id, gender, role, age_group)
+    
+    audio_filename = f"narration_{scene_id}.mp3"
+    audio_path = audio_dir / audio_filename
+
+    # Clean text: remove action directions in parentheses
+    clean_text = re.sub(r'\([^)]*\)', '', text).strip()
+    clean_text = re.sub(r'\s+', ' ', clean_text)
+    
+    if not clean_text:
+        clean_text = text
+
+    # Try Qwen TTS (Local)
+    from backend.services.qwen_tts_service import generate_qwen_tts
+    
+    success = await generate_qwen_tts(
+        text=clean_text,
+        output_path=str(audio_path),
+        character_id=character_id,
+        gender=gender,
+        role=role,
+        age_group=age_group
+    )
+    
+    # Fallback to Google TTS (REST)
+    if not success:
+        logger.info(f"🔄 Falling back to Google TTS for scene {scene_id}")
+        success = await generate_google_tts(
+            text=clean_text, 
+            voice_name=v_settings["name"], 
+            output_path=str(audio_path),
+            pitch=v_settings["pitch"],
+            speaking_rate=v_settings["rate"]
+        )
+    
+    if not success:
+         logger.error(f"⚠️ Failed to generate any TTS for scene {scene_id}")
+         return {"path": "", "duration": 0}
+
+    # Post-process: Normalize and Speed up using FFmpeg
+    try:
+        # loudnorm for volume equalization, atempo=1.15 to ensure all reading speeds are consistently energetic
+        filters = "loudnorm,atempo=1.15"
+        normalized_path = audio_path.with_name(f"narration_{scene_id}_norm.mp3")
+
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(audio_path), "-af", filters, str(normalized_path)],
+            capture_output=True, check=True
+        )
+        
+        if normalized_path.exists():
+            audio_path.unlink()
+            normalized_path.rename(audio_path)
+            
+        duration = get_audio_duration(str(audio_path))
+    except Exception as e:
+        logger.warning(f"⚠️ Audio normalization failed: {e}")
+        duration = get_audio_duration(str(audio_path))
+
+    return {"path": str(audio_path), "duration": duration}
+
+
+async def generate_all_narrations(
+    script_data: dict, job_dir: Path
+) -> list[dict]:
+    """
+    Generate narrations for all scenes using a batch strategy for absolute consistency.
+    Steps:
+    1. Group scenes by character.
+    2. For each character, join their scripts with a 2sec silence gap.
+    3. Generate one long TTS audio for that character (Model 0.6B).
+    4. Detect silence to split the audio into individual scene files.
+    """
+    scenes = script_data.get("scenes", [])
+    characters_map = {c["id"]: c for c in script_data.get("characters", [])}
+    audio_dir = job_dir / "audio"
+    audio_dir.mkdir(exist_ok=True)
+
+    # 1. Group scenes by character to maintain speaker order
+    from collections import defaultdict
+    char_groups = defaultdict(list)
+    for scene in scenes:
+        char_id = scene.get("character_id", "char_1")
+        char_groups[char_id].append(scene)
+
+    # Dictionary to store final {scene_id: {path, duration}}
+    final_results = {}
+
+    for char_id, group_scenes in char_groups.items():
+        char_info = characters_map.get(char_id, {})
+        gender = char_info.get("voice_category", "female")
+        role = char_info.get("description", "student")
+        age_group = char_info.get("age_group", "young-adult")
+
+        # 2. Concat scripts with marked silence for splitting
+        # Using a long ellipsis or specific punctuation that triggers a natural pause in TTS
+        # Most TTS models pause for ~1-2s on '... ...'
+        separator = "... ... ... " 
+        full_text = separator.join([s["script"] for s in group_scenes])
+        
+        batch_audio_path = audio_dir / f"batch_{char_id}.mp3"
+        
+        logger.info(f"[BatchTTS] Generating batch for {char_id} ({len(group_scenes)} scenes)...")
+        
+        from backend.services.qwen_tts_service import generate_qwen_tts
+        success = await generate_qwen_tts(
+            text=full_text,
+            output_path=str(batch_audio_path),
+            character_id=char_id,
+            gender=gender,
+            role=role,
+            age_group=age_group,
+            model_size="0.6B" # Forced 0.6B for batching as requested
+        )
+
+        if not success:
+            logger.error(f"[BatchTTS] Batch generation failed for {char_id}. Falling back to sequential.")
+            # Sequential Fallback
+            for scene in group_scenes:
+                res = await generate_narration(
+                    text=scene["script"],
+                    scene_id=scene["scene_id"],
+                    job_dir=job_dir,
+                    character_id=char_id,
+                    gender=gender,
+                    role=role,
+                    age_group=age_group
+                )
+                final_results[scene["scene_id"]] = res
+            continue
+
+        # 3. Detect silence to find split points
+        # We need to find segments equivalent to len(group_scenes)
+        try:
+            # ffmpeg silencedetect filter
+            split_cmd = [
+                "ffmpeg", "-i", str(batch_audio_path),
+                "-af", "silencedetect=noise=-30dB:d=0.5", 
+                "-f", "null", "-"
+            ]
+            split_proc = subprocess.run(split_cmd, capture_output=True, text=True)
+            output = split_proc.stderr
+
+            # Parse silence_start/silence_end
+            silence_starts = [float(m.group(1)) for m in re.finditer(r"silence_start: (\d+\.?\d*)", output)]
+            silence_ends = [float(m.group(1)) for m in re.finditer(r"silence_end: (\d+\.?\d*)", output)]
+            
+            # Simple heuristic: The midpoint of each silence is our cut point
+            # But normally we can just use segment filter if we know the count
+            
+            # Better strategy: Use ffmpeg to split into segments automatically based on silence
+            segment_pattern = str(audio_dir / f"temp_{char_id}_%03d.mp3")
+            subprocess.run([
+                "ffmpeg", "-y", "-i", str(batch_audio_path),
+                "-af", "silencedetect=noise=-30dB:d=0.5",
+                "-f", "segment", "-segment_format", "mp3", 
+                "-segment_times", ",".join(map(str, silence_starts)), 
+                segment_pattern
+            ], capture_output=True, check=True)
+
+            # Map generated segments back to scenes
+            temp_files = sorted(list(audio_dir.glob(f"temp_{char_id}_*.mp3")))
+            
+            # If mismatch in counts, log warning and try to recover or fallback
+            if len(temp_files) != len(group_scenes):
+                logger.warning(f"[BatchTTS] Split mismatch! Got {len(temp_files)} segments for {len(group_scenes)} scenes. Falling back to sequential.")
+                # Fallback logic here... (Simplified for now: use sequential)
+                for scene in group_scenes:
+                    res = await generate_narration(scene["script"], scene["scene_id"], job_dir, char_id, gender, role, age_group)
+                    final_results[scene["scene_id"]] = res
+            else:
+                for idx, scene in enumerate(group_scenes):
+                    target_path = audio_dir / f"narration_{scene['scene_id']}.mp3"
+                    
+                    # Normalize and speed up the segment
+                    filters = "loudnorm,atempo=1.15"
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-i", str(temp_files[idx]), "-af", filters, str(target_path)],
+                        capture_output=True, check=True
+                    )
+                    
+                    duration = get_audio_duration(str(target_path))
+                    final_results[scene["scene_id"]] = {"path": str(target_path), "duration": duration}
+                    
+                    # Cleanup temp
+                    temp_files[idx].unlink()
+
+            # Cleanup batch file
+            if batch_audio_path.exists(): batch_audio_path.unlink()
+
+        except Exception as e:
+            logger.error(f"[BatchTTS] Splitting failed: {e}")
+            # Sequential Fallback
+            for scene in group_scenes:
+                res = await generate_narration(scene["script"], scene["scene_id"], job_dir, char_id, gender, role, age_group)
+                final_results[scene["scene_id"]] = res
+
+    # 4. Return in original scene order
+    return [final_results[s["scene_id"]] for s in scenes]
+
+
+def get_audio_duration(audio_path: str) -> float:
+    """Get actual audio duration using ffprobe."""
+    import json as json_lib
+
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_format",
+                str(audio_path),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        info = json_lib.loads(result.stdout)
+        return float(info["format"]["duration"])
+    except Exception:
+        return 5.0  # fallback default

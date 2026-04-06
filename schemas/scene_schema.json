@@ -1,0 +1,13 @@
+{
+    "video_title": "string",
+    "scenes": [
+        {
+            "scene_id": "number",
+            "character": "string",
+            "background": "string",
+            "motion": "string",
+            "script": "string",
+            "duration": "number"
+        }
+    ]
+}

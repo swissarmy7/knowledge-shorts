@@ -1,0 +1,7 @@
+{
+    "topic": "string",
+    "tags": [
+        "string"
+    ],
+    "duration": "number"
+}

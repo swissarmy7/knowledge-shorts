@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  shorts-app:
+    build: .
+    container_name: shorts-generator
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./output:/app/output
+      - ./.env:/app/.env
+      - ./google_cloud_key.json:/app/google_cloud_key.json
+    restart: always
+    environment:
+      - REMOTION_CONCURRENCY=4
+      - NODE_ENV=production

@@ -1,0 +1,51 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Node (Video Engine)
+node_modules/
+video-engine/node_modules/
+video-engine/out/
+video-engine/dist/
+.npm
+npm-debug.log*
+
+# Project Specific
+output/
+temp/
+tmp/
+assets/
+*.mp3
+*.png
+*.mp4
+test_out*.json
+qwen_api_info.json
+
+# CRITICAL: Security & Credentials
+.env
+.env.local
+google_cloud_key.json
+gen-lang-client-*.json
+token.pickle
+client_secrets.json
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo

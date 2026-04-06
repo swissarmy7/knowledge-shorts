@@ -1,0 +1,13 @@
+# Prompt Engine
+
+모든 이미지 생성 프롬프트는 다음 구조를 사용
+
+SUBJECT
+STYLE
+CAMERA
+LIGHTING
+COLOR
+ENVIRONMENT
+MOTION
+COMPOSITION
+RENDER

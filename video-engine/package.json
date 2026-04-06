@@ -1,0 +1,21 @@
+{
+    "name": "shorts-video-engine",
+    "version": "1.0.0",
+    "private": true,
+    "scripts": {
+        "studio": "remotion studio",
+        "render": "remotion render ShortsVideo out/video.mp4",
+        "build": "remotion render"
+    },
+    "dependencies": {
+        "@remotion/cli": "4.0.248",
+        "@remotion/media-utils": "4.0.248",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+        "remotion": "4.0.248"
+    },
+    "devDependencies": {
+        "@types/react": "^19.0.0",
+        "typescript": "^5.7.0"
+    }
+}
