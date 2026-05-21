@@ -113,6 +113,15 @@ body.yt-theme {
 .scene-count-option:hover { background: rgba(255,255,255,0.1); }
 .scene-count-option.active { background: rgba(212,255,0,0.15); border-color: var(--accent-yellow); color: var(--accent-yellow); font-weight: 700; }
 
+.visual-style-toggle { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 8px; }
+.visual-style-option {
+    background: rgba(255,255,255,0.05); border: 1px solid transparent; color: var(--yt-text-secondary);
+    padding: 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; transition: all 0.2s;
+    text-align: center;
+}
+.visual-style-option:hover { background: rgba(255,255,255,0.1); }
+.visual-style-option.active { background: rgba(212,255,0,0.15); border-color: var(--accent-yellow); color: var(--accent-yellow); font-weight: 700; }
+
 /* Workspace Step */
 .dual-frame-layout { display: grid; grid-template-columns: 1fr 380px; gap: 20px; height: calc(100vh - 160px); }
 

@@ -30,6 +30,8 @@ const directionInput = document.getElementById('direction-input');
 const tagsInput = document.getElementById('tags-input');
 const generateBtn = document.getElementById('generate-btn');
 const sceneCountOptions = document.querySelectorAll('.scene-count-option');
+const visualStyleOptions = document.querySelectorAll('.visual-style-option');
+let selectedVisualStyle = 'cute-2d';
 
 // DOM Elements - Editor
 const scenesContainer = document.getElementById('scenes-container');
@@ -112,6 +114,11 @@ function resetUI() {
     resultYoutubeDescription.textContent = '';
     resultYoutubeTags.textContent = '';
     resetSteps();
+    
+    selectedVisualStyle = 'cute-2d';
+    visualStyleOptions.forEach(o => {
+        o.classList.toggle('active', o.dataset.style === 'cute-2d');
+    });
     
     showStep('input-step');
     resultSection.classList.add('hidden');
@@ -203,7 +210,8 @@ async function startScriptGeneration() {
                 tags: tagsInput.value.split(','),
                 direction: directionInput.value,
                 style: 'star-instructor',
-                scene_count: selectedSceneCount
+                scene_count: selectedSceneCount,
+                visual_style: selectedVisualStyle
             }),
         });
 
@@ -663,7 +671,11 @@ async function handleAiImageGenerate(idx) {
         const res = await fetchWithAuth(buildAppUrl('api/generate-image'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: imagePrompt, scene_script: currentScriptData.scenes[idx].script })
+            body: JSON.stringify({
+                prompt: imagePrompt,
+                scene_script: currentScriptData.scenes[idx].script,
+                visual_style: currentScriptData.visual_style || 'cute-2d'
+            })
         });
         const data = await parseJson(res);
         if (data.error) throw new Error(data.error);
@@ -707,6 +719,15 @@ sceneCountOptions.forEach(opt => {
         opt.classList.add('active');
         selectedSceneCount = parseInt(opt.dataset.count);
         console.log('Selected count:', selectedSceneCount);
+    };
+});
+
+visualStyleOptions.forEach(opt => {
+    opt.onclick = () => {
+        visualStyleOptions.forEach(o => o.classList.remove('active'));
+        opt.classList.add('active');
+        selectedVisualStyle = opt.dataset.style;
+        console.log('Selected visual style:', selectedVisualStyle);
     };
 });
 

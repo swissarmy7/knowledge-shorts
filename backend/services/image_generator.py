@@ -62,6 +62,7 @@ def build_structured_scene_prompt(
     topic: str = "",
     situation: str = "",
     composition_mode: str = "vertical",
+    visual_style: str = "cute-2d",
 ) -> str:
     topic_context = sanitize_visual_text(topic)
     situation_context = sanitize_visual_text(situation)
@@ -71,12 +72,22 @@ def build_structured_scene_prompt(
         else "1:1 square composition, centered focal hierarchy, self-contained subject framing, clean negative space, strong readability for overlay reuse."
     )
 
-    return f"""[Style] Cute 2D animation illustration — bold clean outlines, flat cel-shading with soft pastel tones, round friendly shapes, warm and cheerful visual mood. Drawn in a consistent animated series style so every scene looks like it belongs to the same show.
-[Color Palette] Warm whites, soft sky blue, peach, mint green, coral, golden yellow. Bright and cheerful, good contrast for mobile. No dark muddy tones, no moody shadows, no muted desaturated palette.
+    if visual_style == "botero":
+        style_dna = "[Style] Fernando Botero's style (Boterismo) — voluptuous exaggerated volume, extremely plump and bloated figures, smooth rounded shapes, clean outlines, flat oil painting aesthetic, rich warm colors, slightly whimsical and humorous tone. Every person, animal, and object in the scene must look inflated, round, and volumetric, as if painted by Fernando Botero. Drawn in a highly consistent manner so every scene looks like it belongs to the same collection."
+        color_palette = "[Color Palette] Rich warm tones, soft sky blue, peach, mint green, coral, golden yellow. Bright and cheerful, good contrast for mobile. No dark muddy tones, no moody shadows, no muted desaturated palette."
+        rendering_style = "[Rendering] Flat oil painting shading — clean uniform outlines, smooth rounded volumes, clean flat color fields. No photorealistic textures, no complex gradients, no digital glow overlays."
+    else:
+        # Default cute-2d
+        style_dna = "[Style] Cute 2D animation illustration — bold clean outlines, flat cel-shading with soft pastel tones, round friendly shapes, warm and cheerful visual mood. Drawn in a consistent animated series style so every scene looks like it belongs to the same show."
+        color_palette = "[Color Palette] Warm whites, soft sky blue, peach, mint green, coral, golden yellow. Bright and cheerful, good contrast for mobile. No dark muddy tones, no moody shadows, no muted desaturated palette."
+        rendering_style = "[Rendering] Flat 2D animation style — bold uniform outlines, 2–3 tone cel shading, soft rounded highlights. No photorealistic textures, no painterly brush strokes, no complex gradients, no dreamy fog or glow overlays."
+
+    return f"""{style_dna}
+{color_palette}
 [Subject] Build the entire frame around this visual idea from the script: {visual_desc}.
 [Environment] Charming simplified scene environment with friendly background props, warm ambient lighting, clear subject-background separation. Topic: {topic_context}. Situation: {situation_context}.
 [Composition] {composition_line}
-[Rendering] Flat 2D animation style — bold uniform outlines, 2–3 tone cel shading, soft rounded highlights. No photorealistic textures, no painterly brush strokes, no complex gradients, no dreamy fog or glow overlays.
+{rendering_style}
 [Consistency] Same line weight, same color temperature, same illustration density as the other scenes in this series — scene #{scene_id} of the same animated short.
 
 [Hard Constraints]
@@ -92,6 +103,7 @@ async def generate_scene_image(
     topic: str = "",
     situation: str = "",
     log_callback: callable = None,
+    visual_style: str = "cute-2d",
     **_kwargs,
 ) -> str:
     visual_desc = sanitize_visual_text(scene.get("background_description", "Relevant educational visual metaphor"))
@@ -102,9 +114,10 @@ async def generate_scene_image(
         scene_id=scene_id,
         topic=topic,
         situation=situation,
+        visual_style=visual_style,
     )
 
-    hash_input = f"cute_anim_v1|scene_{scene_id}|{visual_desc}|{topic}|{situation}"
+    hash_input = f"shorts_v3|{visual_style}|scene_{scene_id}|{visual_desc}|{topic}|{situation}"
     prompt_hash = hashlib.md5(hash_input.encode()).hexdigest()
     cached_path = CACHE_DIR / f"{prompt_hash}.png"
 

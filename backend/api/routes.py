@@ -94,6 +94,7 @@ class GenerateRequest(BaseModel):
     direction: str = ""
     style: str = "star-instructor"  # Only Star Instructor now
     scene_count: int = 12  # 8, 10, or 12
+    visual_style: str = "cute-2d"
 
 
 class VideoGenerateRequest(BaseModel):
@@ -163,10 +164,10 @@ async def start_script_generation(req: GenerateRequest, current_user: str = Depe
     """Generate script only (Step 1 of the new interactive pipeline)."""
     job_id = str(uuid.uuid4())[:8]
     
-    logger.info(f"[{job_id}] Script Generation Start: topic='{req.topic}'")
+    logger.info(f"[{job_id}] Script Generation Start: topic='{req.topic}', visual_style='{req.visual_style}'")
     
     try:
-        script_data = await generate_script(req.topic, req.tags, req.direction, req.style, req.scene_count)
+        script_data = await generate_script(req.topic, req.tags, req.direction, req.style, req.scene_count, req.visual_style)
         return {
             "job_id": job_id,
             "status": "script_ready",
@@ -212,6 +213,7 @@ async def upload_asset(file: UploadFile = File(...), current_user: str = Depends
 class OverlayImageRequest(BaseModel):
     prompt: str
     scene_script: str = ""  # Optional: scene context for better generation
+    visual_style: str = "cute-2d"
 
 
 @router.post("/generate-image")
@@ -219,7 +221,7 @@ async def generate_overlay_image(req: OverlayImageRequest, current_user: str = D
     """Generate an AI illustration image for use as an overlay."""
     from google.genai import types
 
-    # Sync style requirements with the main image generator (2D Vector Animation)
+    # Sync style requirements with the main image generator (2D Vector Animation / Botero)
     safe_prompt = sanitize_visual_text(req.prompt)
 
     scene_context = sanitize_visual_text(req.scene_script)
@@ -229,6 +231,7 @@ async def generate_overlay_image(req: OverlayImageRequest, current_user: str = D
         topic=safe_prompt,
         situation=scene_context,
         composition_mode="square",
+        visual_style=req.visual_style,
     ) + """
 [Overlay Specific]
 - Generate the main visual idea as a clean isolated square-friendly composition for reuse as an overlay asset.
@@ -238,7 +241,7 @@ async def generate_overlay_image(req: OverlayImageRequest, current_user: str = D
 
     # Generate a deterministic hash for the prompt to use as a cache key
     import hashlib
-    prompt_hash = hashlib.md5(f"star_instructor_v2|{illustration_prompt}".encode()).hexdigest()
+    prompt_hash = hashlib.md5(f"star_instructor_v3|{req.visual_style}|{illustration_prompt}".encode()).hexdigest()
     
     # Global image cache directory
     from backend.services.image_generator import CACHE_DIR
@@ -467,9 +470,10 @@ async def run_video_pipeline(job_id: str, script_data: dict, job_dir: Path):
         # Create a lookup for character details
         char_lookup = {c["id"]: c for c in characters_list}
         num_scenes = len(scenes)
+        visual_style = script_data.get("visual_style", "cute-2d")
 
         # Step 2: Generate Images
-        logger.info(f"[{job_id}] Step 2/4: Generating images...")
+        logger.info(f"[{job_id}] Step 2/4: Generating images... style={visual_style}")
         _update_job(job_id, "generating_images", 10, "🎨 배경 이미지 생성 시작...")
         
         # Extract topic and situation for image context
@@ -503,6 +507,7 @@ async def run_video_pipeline(job_id: str, script_data: dict, job_dir: Path):
                 enriched_scene, images_dir, 
                 topic=topic_context, 
                 situation=situation_context,
+                visual_style=visual_style,
                 log_callback=lambda m: _update_job(job_id, "generating_images", progress, m)
             )
             image_paths.append(path)
