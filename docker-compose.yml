@@ -10,6 +10,11 @@ services:
       - ./output:/app/output
       - ./.env:/app/.env
       - ./google_cloud_key.json:/app/google_cloud_key.json
+      # Code volumes: changes apply on container restart (no rebuild needed)
+      - ./backend:/app/backend
+      - ./frontend:/app/frontend
+      - ./systems:/app/systems
+      - ./video-engine/src:/app/video-engine/src
     restart: always
     environment:
       - REMOTION_CONCURRENCY=4

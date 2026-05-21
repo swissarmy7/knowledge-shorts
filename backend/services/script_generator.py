@@ -1,8 +1,9 @@
 """
 Script Generator Service
 Uses Gemini API to generate scripts and scene plans from a topic.
-Includes web search grounding for factual accuracy.
+Optimized for a clean narrator-led visual storytelling format.
 """
+import asyncio
 import json
 import re
 import logging
@@ -14,349 +15,634 @@ logger = logging.getLogger("shorts")
 
 client = genai.Client(api_key=GOOGLE_GEMINI_API)
 
+SCENE_DURATION_TARGETS = {
+    8: {
+        "target_seconds": 60,
+        "min_seconds": 54,
+        "max_seconds": 68,
+        "recommended_per_scene": 8,
+    },
+    10: {
+        "target_seconds": 88,
+        "min_seconds": 80,
+        "max_seconds": 96,
+        "recommended_per_scene": 9,
+    },
+    12: {
+        "target_seconds": 108,
+        "min_seconds": 98,
+        "max_seconds": 116,
+        "recommended_per_scene": 9,
+    },
+}
+
+KOREAN_NARRATION_CHARS_PER_SECOND = 5.7
+CHAR_BUDGET_TOLERANCE = 0.10
+SCENE_CHAR_TOLERANCE = 0.20
+MAX_SCENE_SENTENCES = 2
+TITLE_HOOK_KEYWORDS = (
+    "모르면", "반드시", "절대", "결국", "진짜", "속는", "낭패", "손해",
+    "이유", "위험", "주의", "함정", "반전", "끝장", "안심", "실수",
+)
+
+
+def get_duration_target(scene_count: int) -> dict:
+    target = dict(
+        SCENE_DURATION_TARGETS.get(
+            scene_count,
+            {
+                "target_seconds": min(115, max(60, scene_count * 9)),
+                "min_seconds": max(54, scene_count * 8),
+                "max_seconds": min(120, scene_count * 10),
+                "recommended_per_scene": 9,
+            },
+        )
+    )
+
+    target_seconds = float(target["target_seconds"])
+    total_chars = round(target_seconds * KOREAN_NARRATION_CHARS_PER_SECOND)
+    scene_chars = total_chars / max(scene_count, 1)
+
+    target["min_total_chars"] = max(180, round(total_chars * (1 - CHAR_BUDGET_TOLERANCE)))
+    target["max_total_chars"] = round(total_chars * (1 + CHAR_BUDGET_TOLERANCE))
+    target["target_total_chars"] = total_chars
+    target["min_scene_chars"] = max(18, round(scene_chars * (1 - SCENE_CHAR_TOLERANCE)))
+    target["max_scene_chars"] = round(scene_chars * (1 + SCENE_CHAR_TOLERANCE))
+    target["target_scene_chars"] = round(scene_chars)
+    return target
+
 
 # =============================================================================
-# SYSTEM PROMPTS - 교육 숏폼 대화 스크립트 생성 전문 프롬프트
-# =============================================================================
-# SYSTEM PROMPTS - 교육 숏폼 대화 스크립트 생성 전문 프롬프트
+# SYSTEM PROMPT - 내레이터 중심 지식 쇼츠 생성 프롬프트
 # =============================================================================
 
-# --- 공통 규칙 (두 모드 모두 적용) ---
-COMMON_RULES = """
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-캐릭터 설정 가이드 (Dynamic Roles & Visual Consistency)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-영상 전체에서 캐릭터의 외형이 일관되게 유지되어야 합니다. 또한, 주제(Topic)와 의도(Direction)에 따라 가장 적절한 '직업'과 '역할'을 부여하세요.
-이미 특정 캐릭터 설정(이름, 성별, 나이 등)이 지시사항에 포함되어 있다면 이를 최우선으로 준수하세요.
-
-- **char_teacher (메인 화자 / 전문가 A)**: 주제에 가장 전문적인 인물. (예: 역사-교수님, 요리-쉐프, 경제-자산관리사 등)
-- **char_student (서브 화자 / 동료 전문가 B 또는 학습자)**: 대화 상대. (예: 역사-학생, 요리-수자제/견습생, 경제-동료 애널리스트 등)
-- **이름(name)**: 주제에 어울리는 직함이나 이름을 부여하되, 지시에 포함된 이름이 있다면 반드시 그 이름을 사용하세요.
-- **description (외형 묘사)**: 캐릭터의 성별, 연령, 직업에 어울리는 구체적이고 고정적인 복장(영문)을 작성하세요. 반드시 머리 스타일, 눈 색깔, 얼굴형 등을 포함하여 **모든 장면에서 100% 동일한 외형이 유지**되도록 '고정된 기준(Anchor)' 역할을 하는 묘사여야 합니다. 
-- **Visual Consistency Rules**: 
-  - 캐릭터의 피부색이나 머리색 등이 장면의 배경에 따라 변해서는 안 됩니다.
-  - 옷차림(Profession-appropriate attire)을 한 번 정하면 끝까지 유지하세요.
-- **age_group**: MUST be [young-adult]. (Always use 20s~30s, vibrant, youthful. Absolutely FORBIDDEN: 'middle-aged', 'elder', 'old man', 'gray hair', 'senile traits').
-- **IDs**: 반드시 `char_teacher`와 `char_student` ID를 사용.
+STAR_INSTRUCTOR_PROMPT = """
+당신은 한국 유튜브 쇼츠 전문 스크립트 작가입니다.
+순수 내레이터 중심 영상으로, 신뢰감 있고 스크롤을 멈추게 하는 지식 쇼츠를 씁니다.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-상황 및 배경 설정 (Dynamic Scene Context)
+[바이럴 쇼츠 구조 — 반드시 이 스토리 아크를 따르세요]
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-주제와 캐릭터의 역할에 완벽하게 어울리는 장소와 상황을 설정하세요.
-- **Time/Situation**: 주제에 적합한 공간 (예: 요리-주방, 과학-연구소, 역사-박물관/유적지, 경제-증권가 등)
-- **Background Matching**: 씬마다 배경(`background`)과 상세 묘사(`background_description`)를 설정하되, 해당 장면의 대화 내용에 등장하는 구체적인 사물이나 상황이 반영되도록 하세요.
-- **Background Constraint**: `background_description`에는 캐릭터의 외형(얼굴, 옷 등)에 대한 묘사를 절대 포함하지 마세요. 이는 배경 정보일 뿐이며, 캐릭터 묘사는 `characters` 리스트의 정보를 따릅니다.
+① HOOK (장면 1-2): 첫 3초 안에 스크롤을 멈춰야 합니다.
+   - 손해·억울함·반전 사실·숫자로 즉각 충격을 줍니다.
+   - "사실", "알고 보면", "이거 모르면", "당신만 모르는" 패턴을 활용하세요.
+   - 나쁜 예: "오늘은 해외 카드 사용에 대해 알아보겠습니다."
+   - 좋은 예: "해외여행 가서 카드 긁었다가 거절당한 경험 있으세요? 사실 이건 당신 잘못이 아닙니다."
+
+② TENSION BUILD (장면 3-4): 왜 이게 중요한지 공감과 긴장감을 높입니다.
+   - "그런데 말이죠", "여기서 문제가 있습니다" 같은 전환 표현으로 흐름을 이어가세요.
+   - 시청자의 상황("여행 가기 전", "카드 발급받을 때")에 맞게 공감대를 형성하세요.
+
+③ CORE FACTS (중간 장면들): 핵심 정보를 하나씩, 리듬감 있게 전달합니다.
+   - 장면마다 한 포인트만 다룹니다.
+   - 구체적 수치, 이름, 상황 비교를 활용해 신뢰를 높이세요.
+   - "첫째", "그리고", "마지막으로" 같은 연결어로 흐름을 유지하세요.
+
+④ REVEAL / PAYOFF (뒷부분): 본론의 핵심 반전이나 결론을 보여줍니다.
+   - 앞에서 쌓은 긴장을 여기서 풀어주세요.
+   - "사실은 이렇습니다", "결국 핵심은 단 하나입니다" 패턴이 효과적입니다.
+
+⑤ OUTRO (마지막 장면): 핵심 1줄 + 댓글 유도로 마무리합니다.
+   - 논쟁이나 의견 차이를 유도하는 질문으로 마무리하면 댓글이 폭발합니다.
+   - 예: "이거 알고 있었던 분, 댓글에 손들어 주세요."
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-JSON 출력 형식 (마크다운 코드블록 없이 순수 JSON만)
+[타이틀 생성 원칙 — 스크롤 멈추는 두 줄 카피]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- video_title.highlight: 공백 제외 정확히 10자. (주제+상황+손해/반전을 압축)
+- video_title.rest: 공백 제외 정확히 12자. (왜 봐야 하는지 — 결과/이유/경고)
+- 두 줄은 각자 독립된 카피입니다. 한 문장을 반으로 자르면 실패입니다.
+- 밋밋한 주제명, 교과서식 제목 금지. 감정(손해·반전·억울함)이 드러나야 합니다.
+- 좋은 예 → highlight: "반드시알아야할카드정보" / rest: "모르면여행가서낭패보는정보"
+- 나쁜 예 → highlight: "모르면낭패보는" / rest: "카드정보"
+- 낚시성 과장이나 내용과 무관한 공포 조장 금지. 본문 반전과 연결되어야 합니다.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[JSON 출력 형식 — 마크다운 없이 순수 JSON만]
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {
     "video_title": {
-        "highlight": "첫 장면에 노출될 '노란색 강조' 제목 (최대 13자). 시청자의 뇌를 자극하는 '후킹' 단어 위주.",
-        "rest": "강조 부분 뒤에 이어지는 '흰색' 제목 (최대 18자). 구체적인 맥락 제공."
+        "highlight": "공백 제외 정확히 10자 훅 제목",
+        "rest": "공백 제외 정확히 12자 보조 훅"
     },
-    "subject": "주제 분류 (단일 단어, 박스 안에 표시될 핵심 카테고리. 허용 예시: 경제, 수학, 과학, 역사, 사회, 인문학, IT, 자기계발, 건강 등)",
+    "subject": "주제 분류 (역사/경제/과학 등 2~4자)",
     "youtube_title": "SEO 최적화 제목 (#Shorts 포함)",
     "youtube_description": "매력적인 영상 설명 (해시태그 포함)",
-    "youtube_tags": ["태그1", "태그2", "... 핵심 태그 10~15개"],
-    "core_knowledge": "핵심 지식/메시지 요약",
-    "situation_setting": {
-        "time_period": "시대적 배경 (한글)",
-        "situation": "상황 설정 (한글). 주제와 역할의 연관성 설명.",
-        "concept": "분위기/컨셉 (한글)"
-    },
+    "youtube_tags": ["태그1", "태그2", "... 10~15개"],
     "characters": [
         {
-            "id": "char_teacher",
-            "name": "주제에 맞는 직함/이름 (예: 요리사 성진, 김 대리 등)",
-            "description": "English physical description including modern, trendy, and youthful professional attire. Focus on 20s-30s youthful look.",
-            "voice_category": "male 또는 female",
-            "age_group": "young-adult",
-            "color": "#HEX"
-        },
-        {
-            "id": "char_student",
-            "name": "주제에 맞는 직함/이름 (예: 수제자 민수, 신입사원 지은 등)",
-            "description": "English physical description including youthful modern look. Focus on early 20s.",
-            "voice_category": "male 또는 female",
-            "age_group": "young-adult",
-            "color": "#HEX"
+            "id": "narrator",
+            "name": "내레이터",
+            "description": "No visible presenter. Visual storytelling only.",
+            "voice_category": "neutral",
+            "age_group": "adult",
+            "color": "#d4ff00"
         }
     ],
     "scenes": [
         {
             "scene_id": 1,
-            "character_id": "char_teacher 또는 char_student",
-            "character": "캐릭터 성함/직함 (한글, characters 리스트의 name과 일치)",
-            "background": "배경 장소 (한글, 주제에 맞는 구체적 장소)",
-            "background_description": "Detailed English description of the background, reflecting the scene's script content",
-            "motion": "캐릭터의 동작 (한글)",
-            "script": "대사 (구어체, 순수 대사만)",
-            "duration": 5
+            "character_id": "narrator",
+            "script": "내레이션 대사 (완전한 한국어 구어체 문장)",
+            "blackboard_content": "Full-frame visual scene description (English only. Pure visual objects, actions, spatial relationships. No text, no letters, no numbers, no signs anywhere.)",
+            "character_gesture": "none",
+            "duration": 8
         }
     ]
 }
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-후킹 타이틀 제작 전략 (YouTube Click-Bait Strategy)
+[스크립트 작성 규칙 — CRITICAL]
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-타이틀은 단순히 주제를 설명하는 것이 아니라, 시청자가 1초 만에 멈추게 하는 '갈고리'입니다. 
 
-1. **Highlight (노란색 글자 - 시각적 충격)**:
-   - **기법**: 의문형, 부정형, 충격적 사실, 강력한 형용사 사용.
-   - **Good**: "99%가 틀림", "이 걸 몰랐어?", "충격적인 정체", "절대 하지마", "이건 마법임"
-   - **Bad**: "세종대왕 정보", "지구의 나이", "커피의 효능" (너무 평범함)
-   
-2. **Rest (흰색 글자 - 호기심 충족)**:
-   - 강조 문구 뒤에 붙어 무엇에 관한 내용인지 본능적으로 이해하게 만듭니다.
-   - **Good**: "우리가 속은 소금의 진실", "삼성도 모르는 비밀 무기", "내일부터 당장 연봉 오름"
-   
-3. **Subject (주제 카테고리)**:
-   - 복잡한 설명 대신 시청자가 콘텐츠의 '분야'를 즉각적으로 인지하게 하는 단일 키워드여야 합니다.
-   - **Allowed**: "경제", "과학", "역사", "수학", "사회", "인문학", "IT", "건강" 등
-   - **Bad**: "역설 경제", "미친 팩트", "지식 카타르시스" (너무 추상적임)
+【발화량 계산】
+- 총 내레이션: 공백 제외 {min_total_chars}~{max_total_chars}자. 목표 {target_total_chars}자.
+- 장면당: {min_scene_chars}~{max_scene_chars}자. 목표 {target_scene_chars}자.
+- 장면당 문장은 1~2문장 이내. 2문장을 넘기면 실패입니다.
+- TTS가 한 호흡에 읽을 수 있을 정도로 짧고 명확하게 쓰세요.
+- 발화량 목표: 총 {min_seconds}~{max_seconds}초 분량.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-스크립트 품질 및 정보 전달 규칙 (CRITICAL)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. **타이틀 퀄리티**: `video_title`은 영상의 얼굴입니다. 위 후킹 전략을 사용하여 검색량 높은 키워드와 자극적인 문구를 조합하세요.
-2. **지식 밀도 극대화**: "대박!", "와!", "정말요?" 같은 단순 감탄사 비중을 15% 이하로 낮추고, 모든 씬에서 실질적인 정보(수치, 원인, 결과, 핵심 개념 등)가 한 문장 이상 포함되어야 합니다.
-3. **정보 소우선 순위**: 유저가 제공한 '의도/방향(User Info)' 정보가 구체적일 경우, 해당 정보를 **절차와 논리에 맞춰 가공하는 데 집중**하세요. 임의로 내용을 축약하지 말고 모든 핵심 팩트를 다이얼로그에 녹여내세요.
-4. **영상 길이 필수 준수**: 총 영상 길이 **30~85초** 내외. 씬 개수 **정확히 {scene_count}개**.
-5. **대화의 리듬**: 정보가 많더라도 지루하지 않게 "그게 왜 그런 거죠?", "사실 이건 ~이기 때문입니다"와 같은 인과관계를 중심으로 자연스러운 핑퐁 대화를 유지하세요.
-6. **마무리(Outro)**: 마지막 씬은 반드시 지식의 핵심을 한 줄 요약하며 채널 구독/좋아요 유도 멘트로 마무리.
-7. **감탄사/말줄임표 금지**: TTS 품질을 위해 "오", "아", "헐" 등 단독 감탄사와 `...` 사용 금지. 문장 끝에는 반드시 명확한 마침표(.)나 물음표(?)를 사용하세요.
+【한국어 문법 및 말투】
+- 모든 문장은 완전한 서술어로 끝나야 합니다. (-습니다, -이죠, -해요, -겠습니다, -군요 등)
+- 명사구로만 끝나는 문장, 서술어 없는 문장은 실패입니다. (예: "중요한 포인트." → 금지)
+- 구어체를 쓰되 신뢰감 있는 톤을 유지하세요.
+- 쉼표를 문장 늘리기 수단으로 남용하지 마세요. 핵심만 짧게.
+- 각 문장은 소리 내어 읽었을 때 자연스러워야 합니다.
+- 감탄사("오", "와")는 TTS 품질에 영향을 주므로 사용 금지.
+
+【팩트 정확성 — 허위 정보 절대 금지】
+- 제공된 참고 자료에서 확인된 사실만 사용하세요.
+- 확인되지 않은 규정, 법적 위험, 통계를 지어내지 마세요.
+- 수치나 규정이 불확실하면 "알려진 바로는", "일반적으로", "약 OO" 처럼 보수적으로 표현하세요.
+- 특히 카드/금융/의료/법률 정보는 추정 대신 확인된 사용 팁 중심으로 설명하세요.
+
+【논리적 일관성 — 가장 흔한 실패 패턴】
+- 전체 장면을 작성한 뒤, 아래 일관성 체크를 반드시 수행하세요:
+  ① 앞 장면에서 "X가 있다"고 했는데 뒷 장면에서 "X가 없을 수도 있다"고 하지 않기.
+  ② 앞 장면의 주장과 뒷 장면의 주장이 논리적으로 같은 방향을 가리키는지 확인.
+  ③ "안심하면 안 됩니다" → "기능이 없을 수도 있습니다"처럼 전제를 뒤집는 흐름 금지.
+- 나쁜 예: "컨택리스 마크만 보고 안심하면 큰 오산입니다." 다음 장면에 "일부 카드는 컨택리스 기능이 없을 수도 있습니다." → 마크가 있으면 기능도 있는 것이므로 앞뒤가 모순됨.
+- 좋은 예: "컨택리스 마크가 있어도 특정 국가나 단말기에서는 작동 안 될 수 있습니다." → 마크는 있지만 '호환성' 문제를 지적하는 것이라 논리적으로 일관됨.
+- 드라마 효과를 위해 사실을 왜곡하거나 과장하면 안 됩니다. 진짜 유용한 정보가 더 강력한 훅이 됩니다.
+
+【비주얼 지시】
+- blackboard_content는 글자/숫자/기호 없는 순수 이미지 장면 묘사입니다 (영어로만).
+- 전체 주제 맥락을 반영해야 하며, 발표자·강사·칠판 구도 금지.
+- 장면 전체를 채우는 메인 비주얼이어야 합니다.
+
+【TTS 안전】
+- scene.script에 해시태그, 샵, 별표, URL, 이모지, 영어 CTA, "구독 좋아요", "Shorts" 금지.
+- 순수 한국어 구어체 문장만 작성하세요.
+
+【장면 설계】
+- 장면 수는 정확히 {scene_count}개.
+- 한 장면 = 한 포인트. 예외·이유·주의사항을 한 번에 몰아넣지 마세요.
+- 각 장면은 앞 장면을 이어받아 하나의 이야기처럼 연결되어야 합니다.
 """
 
 
-# =============================================================================
-# MODE A: 전문가/학습자 대화 (Expert-Learner) - (구) 선생님/학생 모드
-# =============================================================================
-TEACHER_STUDENT_PROMPT = """당신은 교육용 숏폼 전문 스크립트 작가입니다. 
-지식을 전달하는 **전문가(Expert)**와 시청자를 대변하여 호기심 가득한 질문을 던지는 **학습자(Learner)**의 대화입니다.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-① 대화 역학 (Dialogue Dynamics)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- **Expert (char_teacher)**: 단순히 지식을 말하는 것이 아니라, 현상의 원인과 비유를 곁들여 "깊게" 설명합니다. "부실한 정보"는 절대 금물입니다.
-- **Learner (char_student)**: "와 신기하다"로 끝내지 마세요. "그럼 반대로 이런 경우는요?", "그 기술의 핵심 원리는 뭔가요?" 같이 수준 높고 구체적인 질문을 던져 정보를 이끌어내세요.
-- **반드시 지켜야 할 구성**: 학습자는 전체 정보량의 흐름을 주도하며, 최소 3번 이상의 명확한 심화 질문을 던져야 합니다.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-② 내러티브 아크 (Narrative Arc)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🔴 HOOK (1~2): 전문가가 흔한 오해를 지적하거나, 충격적인 수치를 선언하며 시작.
-🟡 BUILD (3~5): 학습자의 구체적 의문 제기 + 전문가의 배경 지식 및 메커니즘 설명
-🟢 REVEAL (6~8): 가장 핵심이 되는 지식(하이라이트) 전달.
-🔵 DEEPEN (9~11): 실전 활용 예시 또는 한 단계 더 깊은 비하인드 스토리 전달.
-⚪ OUTRO (12): 전체 내용의 1줄 요약 + 구독 유도.
-""" + COMMON_RULES
+def get_system_prompt(style: str = "star-instructor", scene_count: int = 12) -> str:
+    duration_target = get_duration_target(scene_count)
+    return (
+        STAR_INSTRUCTOR_PROMPT
+        .replace("{scene_count}", str(scene_count))
+        .replace("{min_seconds}", str(duration_target["min_seconds"]))
+        .replace("{max_seconds}", str(duration_target["max_seconds"]))
+        .replace("{min_total_chars}", str(duration_target["min_total_chars"]))
+        .replace("{max_total_chars}", str(duration_target["max_total_chars"]))
+        .replace("{target_total_chars}", str(duration_target["target_total_chars"]))
+        .replace("{min_scene_chars}", str(duration_target["min_scene_chars"]))
+        .replace("{max_scene_chars}", str(duration_target["max_scene_chars"]))
+        .replace("{target_scene_chars}", str(duration_target["target_scene_chars"]))
+    )
 
 
-# =============================================================================
-# MODE B: 전문가 대담 (Expert Dialogue) - 지식 공유 동료들
-# =============================================================================
-EXPERT_DIALOGUE_PROMPT = """당신은 지식 숏폼 전문 스크립트 작가입니다. 
-두 명의 **주제 전문가(Peer Experts)**가 서로의 의견에 살을 붙이며 고도의 정보를 교환하는 설정입니다.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-① 대화 역학 (Dialogue Dynamics)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- **상호 보완 (Additive Knowledge)**: A가 화두(팩트)를 던지면, B는 "맞아요. 거기에 더해 이러한 연구 결과도 있죠"라며 정보를 누적시킵니다.
-- **최고 지식 밀도**: 이 모드는 가장 수준 높은 정보를 전달해야 합니다. 가벼운 수다보다는 "정보의 정수인(Nucleus)"을 전달하는 데 집중하세요.
-- **전문화된 톤**: 전문가끼리의 대화이므로 용어나 수치가 정확해야 하며, 대화 한 마디 한 마디가 꽉 찬 정보를 담고 있어야 합니다.
-""" + COMMON_RULES
+def _speech_char_count(script: str) -> int:
+    return len(re.sub(r"\s+", "", script or ""))
 
 
-# =============================================================================
-# Prompt Selector
-# =============================================================================
-def get_system_prompt(style: str = "teacher-student", scene_count: int = 12) -> str:
-    """Select the appropriate system prompt based on the dialogue style.
-    Injects dynamic scene_count into the prompt template."""
-    if style == "expert-dialogue":
-        return EXPERT_DIALOGUE_PROMPT.replace("{scene_count}", str(scene_count))
-    return TEACHER_STUDENT_PROMPT.replace("{scene_count}", str(scene_count))
+def _title_char_count(value: str) -> int:
+    return len(re.sub(r"\s+", "", str(value or "")))
 
 
-# =============================================================================
-# Web Search Research (Gemini + Google Search Grounding)
-# =============================================================================
+def _video_title_lengths_ok(video_title: str | dict) -> bool:
+    if not isinstance(video_title, dict):
+        return False
+    highlight = video_title.get("highlight", "")
+    rest = video_title.get("rest", "")
+    return _title_char_count(highlight) == 10 and _title_char_count(rest) == 12
+
+
+def _video_title_structure_ok(video_title: str | dict, topic: str = "") -> bool:
+    if not isinstance(video_title, dict):
+        return False
+
+    highlight = str(video_title.get("highlight", "") or "").strip()
+    rest = str(video_title.get("rest", "") or "").strip()
+    if not highlight or not rest:
+        return False
+
+    if highlight == rest:
+        return False
+
+    # Reject obvious "one sentence cut in half" patterns.
+    if highlight.endswith(("의", "를", "을", "이", "가", "은", "는", "로", "와", "과", "도")):
+        return False
+    if rest in topic or highlight in rest:
+        return False
+
+    highlight_has_hook = any(keyword in highlight for keyword in TITLE_HOOK_KEYWORDS)
+    rest_has_hook = any(keyword in rest for keyword in TITLE_HOOK_KEYWORDS)
+
+    # Prefer: highlight anchors the topic, rest carries the curiosity/consequence.
+    topic_tokens = [token for token in re.findall(r"[가-힣A-Za-z0-9]{2,}", topic or "") if len(token) >= 2]
+    highlight_topic_overlap = any(token in highlight for token in topic_tokens)
+    rest_topic_overlap = any(token in rest for token in topic_tokens)
+
+    if not rest_has_hook:
+        return False
+    if highlight_has_hook and not highlight_topic_overlap and rest_topic_overlap:
+        return False
+
+    return True
+
+
+def _sentence_count(script: str) -> int:
+    parts = [part.strip() for part in re.split(r"[.!?。]+", str(script or "")) if part.strip()]
+    return len(parts)
+
+
+_NATURAL_ENDING_RE = re.compile(
+    r"(습니다|ㅂ니다|입니다|았습니다|었습니다|겠습니다|셨습니다"
+    r"|이죠|이지요|거든요|네요|군요|잖아요|랍니다|답니다"
+    r"|해요|하세요|보세요|세요|아요|어요|예요|이에요"
+    r"|죠|지요)$"
+)
+_INVALID_FRAGMENT_RE = re.compile(
+    r"(때문에?|이유로?|위해서?|경우에?|상황에?|처럼|같은|등등?)$"
+)
+
+
+def _script_has_natural_endings(script: str) -> bool:
+    parts = [part.strip(" .") for part in re.split(r"[.!?。]+", str(script or "")) if part.strip()]
+    if not parts:
+        return False
+    for part in parts:
+        if len(part) < 5:
+            return False
+        if _INVALID_FRAGMENT_RE.search(part):
+            return False
+        if not _NATURAL_ENDING_RE.search(part):
+            return False
+    return True
+
+
+def _script_text_from_scenes(scenes: list[dict]) -> str:
+    return "\n".join(
+        scene.get("script", "").strip()
+        for scene in scenes or []
+        if scene.get("script")
+    ).strip()
+
+
+def _normalize_metadata(metadata: dict, topic: str = "") -> dict:
+    safe_topic = (topic or "").strip()
+    title = str(metadata.get("youtube_title", "") or "").strip()
+    description = str(metadata.get("youtube_description", "") or "").strip()
+    tags = metadata.get("youtube_tags", [])
+
+    if not title:
+        title = safe_topic or "지식 쇼츠 #Shorts"
+    if "#Shorts".lower() not in title.lower():
+        title = f"{title} #Shorts".strip()
+    title = re.sub(r"\s+", " ", title)[:100]
+
+    if isinstance(tags, str):
+        tags = [t.strip() for t in tags.split(",") if t.strip()]
+    tags = [
+        re.sub(r"^#+", "", str(tag).strip())
+        for tag in (tags or [])
+        if str(tag).strip()
+    ]
+    tags = list(dict.fromkeys(tags))[:12]
+
+    hashtag_line = " ".join(f"#{tag}" for tag in tags[:5])
+    if not description:
+        description = safe_topic or title.replace("#Shorts", "").strip()
+    description = re.sub(r"\s+", " ", description).strip()
+    existing_hashtags = re.findall(r"#([A-Za-z0-9가-힣_]+)", description)
+    existing_hashtags = list(dict.fromkeys(existing_hashtags))
+    merged_hashtags = list(dict.fromkeys(existing_hashtags + tags[:5]))
+    if merged_hashtags:
+        description = re.sub(r"(?:\s*#(?:[A-Za-z0-9가-힣_]+)\s*)+$", "", description).strip()
+        description = f"{description}\n\n{' '.join(f'#{tag}' for tag in merged_hashtags)}".strip()
+
+    return {
+        "youtube_title": title,
+        "youtube_description": description,
+        "youtube_tags": tags,
+    }
+
+
+async def enrich_script_metadata(script_data: dict, topic: str = "", situation: str = "") -> dict:
+    if not script_data:
+        return script_data
+
+    script_text = _script_text_from_scenes(script_data.get("scenes", []))
+    if not script_text:
+        return script_data
+
+    has_title = bool(str(script_data.get("youtube_title", "") or "").strip())
+    has_description = bool(str(script_data.get("youtube_description", "") or "").strip())
+    has_tags = bool(script_data.get("youtube_tags"))
+    if has_title and has_description and has_tags:
+        normalized = _normalize_metadata(script_data, topic or script_data.get("topic", ""))
+        script_data.update(normalized)
+        return script_data
+
+    metadata = await generate_metadata_from_script(
+        script_text,
+        situation=situation,
+        topic=topic or script_data.get("topic", "") or script_data.get("subject", ""),
+    )
+    script_data.update(_normalize_metadata(metadata, topic or script_data.get("topic", "")))
+    return script_data
+
+
+def _strip_text_requests_from_visual_prompt(value: str) -> str:
+    clean = str(value or "")
+    clean = re.sub(r"(?i)\bwith\s+(the\s+)?words?\s+['\"“”‘’][^'\"“”‘’]+['\"“”‘’]", "with a blank symbolic shape", clean)
+    clean = re.sub(r"(?i)\b(the\s+)?words?\s+['\"“”‘’][^'\"“”‘’]+['\"“”‘’]", "a blank symbolic shape", clean)
+    clean = re.sub(r"['\"“”‘’][^'\"“”‘’]{1,80}['\"“”‘’]", "blank unmarked visual element", clean)
+    replacements = {
+        r"(?i)\bquestion marks?\b": "uncertainty shown by contrasting objects",
+        r"(?i)\b(text|letters?|words?|typography|writing|written|readable)\b": "unmarked visual elements",
+        r"(?i)\b(numbers?|labels?|captions?|signs?)\b": "blank symbolic shapes",
+    }
+    for pattern, replacement in replacements.items():
+        clean = re.sub(pattern, replacement, clean)
+    clean = re.sub(r"[가-힣]+", "", clean)
+    clean = re.sub(r"[?!?？!！]", "", clean)
+    clean = re.sub(r"\bblank symbolic shape\s+unmarked visual elements\s+inside\b", "a blank symbolic shape inside", clean, flags=re.I)
+    clean = re.sub(r"\s+", " ", clean).strip(" ,.-")
+    return clean
+
+
+def _normalize_visual_prompt(value: str, topic: str, direction: str) -> str:
+    clean = _strip_text_requests_from_visual_prompt(value)
+    if not clean or len(clean) < 40:
+        context = f"{topic} {direction}".strip()
+        clean = (
+            "A context-aware visual metaphor based on the full story: "
+            f"{context[:160]}. Use concrete objects, action, and spatial contrast."
+        )
+
+    no_text_rule = (
+        "No readable text, letters, numbers, punctuation, labels, captions, "
+        "logos, watermarks, or question marks; use only pure visual objects and actions."
+    )
+    if "No readable text" not in clean:
+        clean = f"{clean}. {no_text_rule}"
+    return clean[:700]
+
+
+def _sanitize_narration_script(value: str) -> str:
+    script = str(value or "")
+    script = script.replace("\r\n", "\n").replace("\r", "\n")
+    script = re.sub(r"\([^)]*\)", "", script)
+    script = re.sub(r"\[[^\]]*\]", "", script)
+    script = re.sub(r"(?im)^\s*(해시태그|hashtags?|tags?)\s*:?\s*$", "", script)
+    script = re.sub(r"(?im)^\s*(해시태그|hashtags?|tags?)\s*:?\s*(?:#\s*[^\s#]+(?:\s+|$))+", "", script)
+    script = re.sub(r"(?im)^\s*(?:#\s*[^\s#]+(?:\s+|$))+$", "", script)
+    script = re.sub(r"#\s*[^\s#]+", "", script)
+    script = re.sub(r"https?://\S+", "", script)
+    script = re.sub(r"[@*_=+~^|<>`\\/]+", " ", script)
+    script = re.sub(r"[!！?？]+", ".", script)
+    script = re.sub(
+        r"(구독\s*,?\s*좋아요\s*(부탁드려요|눌러주세요)?|좋아요\s*,?\s*구독\s*(부탁드려요|눌러주세요)?|팔로우\s*부탁드려요?)",
+        "",
+        script,
+        flags=re.IGNORECASE,
+    )
+    script = re.sub(
+        r"(구독(과)?\s*좋아요(는|도)?\s*(부탁드릴게요|부탁드려요|눌러주세요|해주세요)?|댓글\s*(남겨주세요|부탁드려요|달아주세요)|팔로우\s*(부탁드려요|해주세요)|알림\s*설정\s*(부탁드려요|해주세요))",
+        "",
+        script,
+        flags=re.IGNORECASE,
+    )
+    script = re.sub(r"\b(shorts|reels|viral|follow|like|subscribe)\b", "", script, flags=re.IGNORECASE)
+    script = re.sub(r"(부정\s*사용으로\s*오해받을\s*수\s*있습니다)", "문제가 생길 수 있습니다", script, flags=re.IGNORECASE)
+    script = re.sub(r"\n{2,}", "\n", script)
+    script = re.sub(r"[ \t]+", " ", script)
+    script = re.sub(r"\s*\n\s*", " ", script)
+    script = re.sub(r"\s+", " ", script).strip(" .,-")
+    if script and not re.search(r"[.!?]$", script):
+        script = f"{script}."
+    return script
+
+
+def sanitize_scene_scripts(script_data: dict) -> dict:
+    for scene in script_data.get("scenes", []):
+        scene["script"] = _sanitize_narration_script(scene.get("script", ""))
+    return script_data
+
+
+def _scene_scripts_ok(result: dict, duration_target: dict) -> bool:
+    scenes = result.get("scenes", [])
+    if not scenes:
+        return False
+
+    max_chars = duration_target["max_scene_chars"]
+    min_chars = max(12, duration_target["min_scene_chars"] - 10)
+    for scene in scenes:
+        script = scene.get("script", "")
+        chars = _speech_char_count(script)
+        if chars > max_chars or chars < min_chars:
+            return False
+        if _sentence_count(script) > MAX_SCENE_SENTENCES:
+            return False
+        if not _script_has_natural_endings(script):
+            return False
+    return True
+
+
+def _postprocess_script_result(result: dict, duration_target: dict, topic: str, direction: str) -> dict:
+    # Metadata sanitization
+    for field in ["youtube_description", "youtube_title"]:
+        if field in result and isinstance(result[field], str):
+            result[field] = re.sub(r"[<>]", "", result[field])
+
+    for scene in result.get("scenes", []):
+        # Compatibility with older schema
+        scene["character"] = "내레이터"
+        scene["background"] = "메인 비주얼"
+        scene["motion"] = "slow_push"
+
+        script = _sanitize_narration_script(scene.get("script", ""))
+        scene["script"] = script
+
+        blackboard_content = scene.get("blackboard_content") or scene.get("background_description") or ""
+        scene["blackboard_content"] = _normalize_visual_prompt(blackboard_content, topic, direction)
+        scene["background_description"] = scene["blackboard_content"]
+        scene["duration"] = max(scene.get("duration", duration_target["recommended_per_scene"]), 4)
+
+    result["duration_target"] = duration_target
+    result["speech_char_count"] = sum(_speech_char_count(s.get("script", "")) for s in result.get("scenes", []))
+    return result
+
+
 async def research_topic(topic: str, direction: str = "") -> str:
-    """Use Gemini + Google Search to gather real-time facts about the topic.
-    Returns a structured summary of key facts for script generation."""
-    
-    research_prompt = f"""다음 주제에 대해 교육용 숏폼 영상 스크립트를 작성하기 위한 핵심 자료를 조사해주세요.
-
+    research_prompt = f"""다음 주제에 대해 내레이터 중심 지식 쇼츠 스크립트를 작성하기 위한 핵심 자료를 조사해주세요.
 주제: {topic}
 {f'의도/방향: {direction}' if direction else ''}
-
-다음 항목을 조사하세요:
-1. **핵심 사실과 수치** - 정확한 날짜, 숫자, 인물 이름, 장소
-2. **흥미로운 사실** - 대중이 잘 모르는 놀라운 포인트 (훅에 활용)
-3. **비유/실생활 연결** - 쉽게 이해할 수 있는 비유 소재
-4. **최신 동향** - 관련 최근 이슈나 뉴스 (있다면)
-5. **논쟁/반전 포인트** - 흔한 오해, 반전 사실 (있다면)
-
-한국어로 간결하게, 팩트 위주로 정리해주세요. 각 항목에 출처가 있으면 포함해주세요."""
+1. 팩트와 수치 2. 흥미로운 반전 포인트 3. 실생활 연결 고리를 정리해주세요."""
 
     try:
-        response = client.models.generate_content(
+        response = await asyncio.to_thread(
+            client.models.generate_content,
             model="gemini-2.0-flash",
             contents=research_prompt,
             config=types.GenerateContentConfig(
                 tools=[types.Tool(google_search=types.GoogleSearch())]
             ),
         )
-        research_text = response.text
-        logger.info(f"[Research] Topic research completed: {len(research_text)} chars")
-        return research_text
+        return response.text
     except Exception as e:
-        logger.warning(f"[Research] Web search failed, proceeding without research data: {e}")
+        logger.warning(f"[Research] failed: {e}")
         return ""
 
 
-# =============================================================================
-# Script Generation - Two-step pipeline (Research → Generate)
-# =============================================================================
-async def generate_script(topic: str, tags: list[str] = None, direction: str = "", style: str = "teacher-student", scene_count: int = 12) -> dict:
-    """Generate a script with scene plan from a topic.
-    
-    Pipeline:
-    1. Research: Use Google Search grounding to gather real-time facts (skip if direction is detailed)
-    2. Generate: Use researched facts + SYSTEM_PROMPT to create the script
-    """
-    # Determination of "richness" of input direction
+async def generate_script(topic: str, tags: list[str] = None, direction: str = "", style: str = "star-instructor", scene_count: int = 12) -> dict:
+    duration_target = get_duration_target(scene_count)
     is_rich_input = len(direction) > 150
     
-    # --- Step 1: Research facts about the topic ---
     research_data = ""
     if not is_rich_input:
-        logger.info(f"[ScriptGen] Step 1/2: Researching topic '{topic}' because input is simple.")
         research_data = await research_topic(topic, direction)
-    else:
-        logger.info(f"[ScriptGen] Step 1/2: Skipping extra research as provided direction is already rich.")
 
-    # --- Step 2: Generate script with enriched context ---
-    logger.info(f"[ScriptGen] Step 2/2: Generating script...")
+    user_prompt = f"주제: {topic}\n"
+    if direction:
+        user_prompt += f"의도/방향: {direction}\n"
+    user_prompt += f"""정확히 {scene_count}개의 장면으로 구성된 내레이터 중심 지식 쇼츠 스크립트를 작성하세요.
+전체 대본은 하나의 이야기처럼 이어져야 하며, 총 발화량은 공백 제외 {duration_target['min_total_chars']}~{duration_target['max_total_chars']}자여야 합니다.
+이번 요청의 시간 예산은 약 {duration_target['target_seconds']}초이며, 목표 총 글자수는 약 {duration_target['target_total_chars']}자입니다.
+특히 {duration_target['max_total_chars']}자를 넘기지 마세요. 장면마다 1~2개의 짧은 문장만 사용하고, 반복 설명은 빼세요.
+장면당 글자수도 약 {duration_target['target_scene_chars']}자 기준으로 고르게 배분하세요.
+한 장면이 길어지면 다음 장면으로 넘기지 말고, 그 장면 자체를 더 짧게 압축하세요.
+규정이나 위험을 설명할 때는 추측성 단정 대신 확인된 내용만 보수적으로 말하세요.
+각 장면은 한 포인트만 설명하세요. 한 장면 안에 예시, 예외, 주의사항을 한꺼번에 몰아넣지 마세요.
+장면 대사는 실제 TTS로 읽을 문장입니다. 내레이터가 숨 한번에 읽을 수 있을 정도로 짧게 쓰세요.
+모든 장면 대사는 문법적으로 완전한 한국어 문장이어야 합니다. 제목 조각처럼 끊긴 문장, 명사구 단독 문장, 서술어 없는 문장은 금지입니다.
+video_title.highlight와 video_title.rest는 문장을 반으로 자른 조각이 아니라, 각자 역할이 다른 두 줄 카피여야 합니다.
+highlight는 주제/대상/상황을 강하게 잡는 전면 훅으로 10자를 꽉 채우고, rest는 왜 봐야 하는지 설명하는 보조 훅으로 12자를 꽉 채우세요.
+두 줄 모두 글자수를 남기지 말고 끝까지 채우세요.
+훅 제목과 부제목은 주제명이 아니라, 이 영상을 끝까지 봐야 하는 반전/손해/오해를 압축한 강한 카피로 만드세요.
+각 blackboard_content는 전체 주제와 상황을 반영한 순수 시각 이미지 프롬프트여야 하며, 글자/숫자/물음표/라벨/문구를 절대 포함하지 마세요.
+blackboard_content라는 이름을 쓰더라도 실제로는 장면 전체를 구성하는 메인 비주얼 설명입니다. 남자 강사, 발표 캐릭터, 칠판 중앙 배치 같은 연출은 넣지 마세요.
+"""
     
-    user_prompt = ""
-    if is_rich_input:
-        user_prompt += "[SOURCE_PRIORITY: HIGH]\n당신은 아래 제공된 '의도/방향'의 정보를 바탕으로 스크립트를 작성해야 합니다. 추가 검색 데이터보다 아래 내용을 최우선으로 반영하세요.\n\n"
-        user_prompt += f"주제: {topic}\n\n"
-        user_prompt += f"의도/방향 (핵심 정보원):\n{direction}\n\n"
-    else:
-        user_prompt += f"주제: {topic}\n"
-        if direction:
-            user_prompt += f"의도/방향: {direction}\n"
-            
-    user_prompt += f"🎯 장면 수: 정확히 {scene_count}개의 씬을 생성하세요. 두 화자가 번갈아가며 대화합니다.\n"
-    if tags:
-        user_prompt += f"태그: {', '.join(tags)}\n"
-    
-    # Append research data if available
-    # Append research data if available
     if research_data:
-        user_prompt += f"\n📋 보조 참고 자료 (위 주제에 대해 조사된 추가 팩트입니다):\n{research_data}"
+        user_prompt += f"\n참고 자료:\n{research_data}\n"
 
-    response = client.models.generate_content(
-        model="gemini-2.0-flash",
-        contents=user_prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=get_system_prompt(style, scene_count),
-            temperature=0.8,
-            response_mime_type="application/json",
-        ),
-    )
+    last_result = None
+    for attempt in range(2):
+        retry_instruction = ""
+        if attempt == 1:
+            retry_instruction = f"""
 
-    result = json.loads(response.text)
-    
-    # === Post-processing ===
-    
-    # Sanitize YouTube metadata (angle brackets are forbidden by YouTube API)
-    for field in ["youtube_description", "youtube_title"]:
-        if field in result and isinstance(result[field], str):
-            result[field] = re.sub(r'[<>]', '', result[field])
-    if "youtube_tags" in result and isinstance(result["youtube_tags"], list):
-        result["youtube_tags"] = [re.sub(r'[<>]', '', t) for t in result["youtube_tags"]]
-    
-    for scene in result.get("scenes", []):
-        if "overlays" not in scene:
-            scene["overlays"] = []
-        
-        # Ensure UI metadata fields exist to avoid frontend 'undefined'
-        if "character" not in scene: 
-            char_id = scene.get("character_id", "char_student")
-            # Default fallback ONLY if name is missing from AI output
-            char_meta = next((c for c in result.get("characters", []) if c["id"] == char_id), None)
-            scene["character"] = char_meta["name"] if char_meta else ("전문가" if "teacher" in char_id else "학생")
-        if "background" not in scene: scene["background"] = "배경"
-        if "motion" not in scene: scene["motion"] = "기본 동작"
-            
-        # Scrub script text (TTS safety)
-        script = scene.get("script", "")
-        # 1. Remove parentheticals like (화내며), (smiling)
-        script = re.sub(r'\(.*?\)', '', script)
-        # 2. Remove character name prefixes like "홍길동: ", "Officer : " 
-        # Supports Korean, English, and wide-width colons
-        script = re.sub(r'^[가-힣a-zA-Z0-9\s]+[:：]', '', script)
-        # 3. Remove ellipsis (TTS reads them unnaturally) and clean up whitespace
-        script = script.replace('...', ' ')
-        script = re.sub(r'\s+', ' ', script).strip()
-        scene["script"] = script
-                
-    return result
+[재시도 지시 — 이전 결과에서 다음 항목을 반드시 수정하세요]
+1. 총 발화량: {duration_target['min_total_chars']}~{duration_target['max_total_chars']}자 (목표 {duration_target['target_total_chars']}자). 이 범위를 벗어나면 오디오 속도가 강제 조정되어 부자연스러워집니다.
+2. 장면당 발화: {duration_target['min_scene_chars']}~{duration_target['max_scene_chars']}자 (목표 {duration_target['target_scene_chars']}자). 균등하게 배분하세요.
+3. 모든 문장은 완전한 서술어(-습니다/-이죠/-해요/-겠습니다 등)로 끝나야 합니다. 명사구 종결 금지.
+4. video_title.highlight는 공백 제외 정확히 10자, rest는 정확히 12자. 한 문장 반토막 금지.
+5. 각 장면 대사는 TTS가 한 호흡에 읽을 분량. 1~2문장 이내.
+6. 참고 자료에 없는 수치나 규정을 지어내지 마세요. 불확실하면 "일반적으로", "알려진 바로는" 등으로 표현하세요.
+7. HOOK 장면부터 바이럴 구조(손해·반전·공감)로 시작하세요.
+"""
+
+        response = await asyncio.to_thread(
+            client.models.generate_content,
+            model="gemini-2.0-flash",
+            contents=user_prompt + retry_instruction,
+            config=types.GenerateContentConfig(
+                system_instruction=get_system_prompt(style, scene_count),
+                temperature=0.30 if is_rich_input else 0.45,
+                response_mime_type="application/json",
+            ),
+        )
+
+        result = _postprocess_script_result(
+            json.loads(response.text),
+            duration_target,
+            topic,
+            direction,
+        )
+        last_result = result
+
+        scenes_ok = len(result.get("scenes", [])) == scene_count
+        speech_ok = duration_target["min_total_chars"] <= result["speech_char_count"] <= duration_target["max_total_chars"]
+        title_ok = _video_title_lengths_ok(result.get("video_title"))
+        title_structure_ok = _video_title_structure_ok(result.get("video_title"), topic)
+        scene_scripts_ok = _scene_scripts_ok(result, duration_target)
+        if scenes_ok and speech_ok and title_ok and title_structure_ok and scene_scripts_ok:
+            result["topic"] = topic
+            sanitize_scene_scripts(result)
+            await enrich_script_metadata(result, topic=topic, situation=result.get("situation_setting", {}).get("situation", ""))
+            return result
+
+        logger.warning(
+            "[ScriptLengthGuard] attempt=%s scenes=%s/%s chars=%s target=%s~%s title_ok=%s title_structure_ok=%s scene_scripts_ok=%s",
+            attempt + 1,
+            len(result.get("scenes", [])),
+            scene_count,
+            result["speech_char_count"],
+            duration_target["min_total_chars"],
+            duration_target["max_total_chars"],
+            title_ok,
+            title_structure_ok,
+            scene_scripts_ok,
+        )
+
+    if last_result:
+        last_result["topic"] = topic
+        sanitize_scene_scripts(last_result)
+        await enrich_script_metadata(last_result, topic=topic, situation=last_result.get("situation_setting", {}).get("situation", ""))
+    return last_result
 
 
-# =============================================================================
-# Metadata Generation from User-Written Script
-# =============================================================================
-async def generate_metadata_from_script(script_text: str, situation: str = "") -> dict:
-    """Generate YouTube metadata (title, description, tags) from a user-written script.
-    
-    Used when the user writes their own script in manual mode and needs
-    AI-generated metadata for YouTube upload.
-    """
-    logger.info(f"[MetadataGen] Generating metadata from manual script ({len(script_text)} chars)")
-    
-    metadata_prompt = f"""아래는 유튜브 쇼츠 영상에 사용될 대본입니다. 이 대본을 분석하여 YouTube에 최적화된 메타데이터를 생성해주세요.
+async def generate_metadata_from_script(script_text: str, situation: str = "", topic: str = "") -> dict:
+    metadata_prompt = f"""다음 쇼츠 대본을 분석해서 지금 유튜브 쇼츠에서 잘 먹히는 형식의 메타데이터를 JSON으로 생성하세요.
+
+조건:
+- 제목은 100자 이내.
+- 제목 앞부분에 핵심 키워드 1~2개를 자연스럽게 넣고, 짧은 호기심/반전/손해회피 톤을 사용.
+- 제목에는 반드시 #Shorts 포함.
+- 설명 첫 1~2문장은 영상 핵심과 검색 키워드를 바로 드러내기.
+- 설명 마지막에는 핵심 해시태그 3~5개 추가.
+- youtube_tags는 검색 의도가 분명한 태그 8~12개. 중복 금지.
+- 과장 낚시, 의미 없는 해시태그 남발, 영어 스팸식 키워드 반복 금지.
+- 한국어 채널 톤으로 자연스럽게 작성.
+
+출력 JSON:
+{{
+  "youtube_title": "제목",
+  "youtube_description": "설명",
+  "youtube_tags": ["태그1", "태그2"]
+}}
+
+주제: {topic}
+상황: {situation}
 
 대본:
 {script_text}
-
-{f'상황 설정: {situation}' if situation else ''}
-
-다음 JSON 형식으로 응답해주세요 (마크다운 코드블록 없이 순수 JSON만):
-{{
-    "youtube_title": "SEO 최적화된 제목 (#Shorts 포함, 대본 내용을 분석하여 시청자의 호기심을 끌 수 있는 제목)",
-    "youtube_description": "매력적인 영상 설명. 대본의 핵심 내용을 요약하여 시청자의 호기심을 자극하고 검색(SEO)에 유리하게 상세히 작성 (해시태그 포함). 꺽쇠 괄호(<, >)는 절대 사용하지 마세요.",
-    "youtube_tags": ["태그1", "태그2", "... 대본 내용과 관련된 검색 키워드 최소 10개, 최대 15개. 꺽쇠 괄호(<, >)는 절대 사용하지 마세요."],
-    "video_title": {{
-        "highlight": "첫 장면 제목의 강조 부분 (핵심 키워드, 최대 13자)",
-        "rest": "나머지 제목 (최대 18자)"
-    }},
-    "subject": "주제 분류명 (2~4자, 예: 역사, 과학, 금융 등)"
-}}"""
-
-    response = client.models.generate_content(
+"""
+    response = await asyncio.to_thread(
+        client.models.generate_content,
         model="gemini-2.0-flash",
         contents=metadata_prompt,
         config=types.GenerateContentConfig(
-            temperature=0.7,
             response_mime_type="application/json",
         ),
     )
-
-    result = json.loads(response.text)
-    
-    # Post-processing: sanitize YouTube metadata (same as generate_script)
-    for field in ["youtube_description", "youtube_title"]:
-        if field in result and isinstance(result[field], str):
-            result[field] = re.sub(r'[<>]', '', result[field])
-    if "youtube_tags" in result and isinstance(result["youtube_tags"], list):
-        result["youtube_tags"] = [re.sub(r'[<>]', '', t) for t in result["youtube_tags"]]
-    
-    logger.info(f"[MetadataGen] Generated metadata: title='{result.get('youtube_title', '')}'")
-    return result
+    return _normalize_metadata(json.loads(response.text), topic)

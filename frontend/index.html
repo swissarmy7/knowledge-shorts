@@ -4,328 +4,239 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 쇼츠 자동생성기</title>
-    <meta name="description" content="AI가 자동으로 쇼츠 영상을 만들어드립니다. 주제만 입력하세요!">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <title>Shorts Studio - AI 지식 쇼츠</title>
+    <meta name="description" content="유튜브 지식 쇼츠 자동 생성 스튜디오">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=4">
 </head>
 
-<body>
+<body class="yt-theme">
     <!-- Login Overlay -->
     <div id="login-overlay" class="login-overlay">
         <div class="login-card">
-            <div class="card-header">
-                <span class="card-icon">🔒</span>
-                <h2>AI Shorts Generator</h2>
-            </div>
-            <p class="login-desc">마스터 비밀번호를 입력해주세요</p>
+            <div class="logo-large">🎬 <span>Shorts</span> Studio</div>
+            <p class="login-desc">스튜디오 입장을 위해 비밀번호를 입력하세요</p>
             <div class="input-group">
-                <input type="password" id="login-password" placeholder="••••••••" autofocus>
+                <input type="password" id="login-password" placeholder="비밀번호" autofocus>
             </div>
-            <button id="login-btn" class="btn-primary">
-                <span class="btn-icon">🔑</span>
-                <span class="btn-text">로그인</span>
-            </button>
+            <button id="login-btn" class="btn-primary">로그인</button>
             <p id="login-error" class="error-message hidden">비밀번호가 올바르지 않습니다.</p>
         </div>
     </div>
 
     <div class="app hidden" id="app-container">
-        <!-- Background Effects -->
-        <div class="bg-gradient"></div>
-        <div class="bg-orbs">
-            <div class="orb orb-1"></div>
-            <div class="orb orb-2"></div>
-            <div class="orb orb-3"></div>
-        </div>
-
-        <!-- Header -->
-        <header class="header">
-            <div class="logo">
-                <span class="logo-icon">🎬</span>
-                <h1 class="logo-text">AI Shorts Generator</h1>
+        <!-- YT Style Header -->
+        <header class="yt-header">
+            <div class="header-left">
+                <button class="menu-btn">☰</button>
+                <div class="logo" id="logo-home">
+                    <span class="logo-icon">🎬</span>
+                    <span class="logo-text">Shorts <span>Studio</span></span>
+                </div>
             </div>
-            <p class="subtitle">주제를 입력하면 AI가 쇼츠 영상을 자동으로 만들어드립니다</p>
+            <div class="header-center">
+                <!-- Search bar style input placeholder or navigation -->
+            </div>
+            <div class="header-right">
+                <nav class="yt-nav">
+                    <button id="nav-create-btn" class="nav-icon-btn active" title="만들기">➕</button>
+                    <button id="nav-history-btn" class="nav-icon-btn" title="보관함">📂</button>
+                    <div class="user-avatar">AD</div>
+                </nav>
+            </div>
         </header>
 
-        <!-- Main Content -->
-        <main class="main">
-            <!-- Input Section -->
-            <section id="input-section" class="card input-card">
-                <!-- Input Mode Tabs -->
-                <div class="input-mode-tabs">
-                    <button type="button" class="mode-tab active" data-mode="ai" id="mode-ai-tab">
-                        <span class="mode-tab-icon">🤖</span>
-                        <span class="mode-tab-text">AI 대본 생성</span>
-                    </button>
-                    <button type="button" class="mode-tab" data-mode="manual" id="mode-manual-tab">
-                        <span class="mode-tab-icon">✍️</span>
-                        <span class="mode-tab-text">대화 직접 작성</span>
-                    </button>
-                </div>
-
-                <!-- AI Mode Content -->
-                <div id="ai-mode-content">
-                    <div class="card-header">
-                        <span class="card-icon">✨</span>
-                        <h2>영상 주제 입력</h2>
+        <!-- Main Workspace -->
+        <main class="yt-main">
+            <!-- STEP 1: Topic Input -->
+            <section id="input-step" class="step-container active">
+                <div class="focused-input-card">
+                    <h2>어떤 쇼츠를 만들까요?</h2>
+                    <p class="step-desc">주제를 입력하면 AI가 대본과 영상을 기획합니다.</p>
+                    
+                    <div class="yt-search-box">
+                        <input type="text" id="topic-input" placeholder="예: 비트코인이 1억을 돌파한 진짜 이유" autocomplete="off">
                     </div>
-                    <div class="input-group">
-                        <input type="text" id="topic-input" placeholder="예: 삼베옷의 역사와 장례 문화" autocomplete="off">
-                        <textarea id="direction-input"
-                            placeholder="의도/방향 (선택사항): 예) 삼베옷은 일제 잔재이므로, 현대 장례문화에서 고인에게 예쁜 옷을 입히자는 방향으로"
-                            rows="3"></textarea>
-                        <div class="tags-input">
-                            <input type="text" id="tags-input" placeholder="태그 (쉼표로 구분, 선택사항)">
+                    
+                    <div class="advanced-options">
+                        <textarea id="direction-input" placeholder="상세 의도나 꼭 포함하고 싶은 내용 (선택사항)"></textarea>
+                        <div class="tags-input-wrapper">
+                            <input type="text" id="tags-input" placeholder="태그 (쉼표 구분)">
                         </div>
-                    </div>
-                </div>
-
-                <!-- Manual Mode Content -->
-                <div id="manual-mode-content" class="hidden">
-                    <div class="card-header">
-                        <span class="card-icon">✍️</span>
-                        <h2>대화 직접 작성</h2>
-                    </div>
-                    <p class="manual-mode-desc">대화 스타일과 장면 수를 선택한 후 "쇼츠 생성하기"를 누르면, 빈 대본이 생성됩니다. 직접 대사를 입력하세요.</p>
-                    <div class="input-group">
-                        <label class="input-label">🎭 상황 설정</label>
-                        <textarea id="manual-situation-input"
-                            placeholder="예: 요리사와 조수가 새로운 레시피를 개발하는 상황 / 선생님과 학생이 역사 수업 중 토론하는 상황"
-                            rows="2"></textarea>
-                    </div>
-                </div>
-
-                <!-- Common: Style + Scene Count -->
-                <div class="common-options">
-                    <div class="style-selector">
-                        <label class="style-label">대화 스타일</label>
-                        <div class="style-toggle">
-                            <button type="button" class="style-option active" data-style="teacher-student" id="style-teacher">
-                                <span class="style-icon">💡</span>
-                                <span class="style-name">전문가 / 학습자</span>
-                                <span class="style-desc">질문과 리액션 중심</span>
-                            </button>
-                            <button type="button" class="style-option" data-style="expert-dialogue" id="style-expert">
-                                <span class="style-icon">🎙️</span>
-                                <span class="style-name">전문가 대담</span>
-                                <span class="style-desc">정보 밀도 극대화</span>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="scene-count-selector">
-                        <label class="style-label">대화 수 (장면 수)</label>
-                        <div class="scene-count-toggle">
-                            <button type="button" class="scene-count-option" data-count="8">
-                                <span class="count-number">8</span>
-                                <span class="count-desc">간결한 구성</span>
-                            </button>
-                            <button type="button" class="scene-count-option" data-count="10">
-                                <span class="count-number">10</span>
-                                <span class="count-desc">균형 잡힌 구성</span>
-                            </button>
-                            <button type="button" class="scene-count-option active" data-count="12">
-                                <span class="count-number">12</span>
-                                <span class="count-desc">풍부한 구성</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <button id="generate-btn" class="btn-primary">
-                    <span class="btn-icon">🚀</span>
-                    <span class="btn-text">쇼츠 생성하기</span>
-                </button>
-            </section>
-
-            <!-- Progress Section -->
-            <section id="progress-section" class="card progress-card hidden">
-                <div class="card-header">
-                    <span class="card-icon">⚡</span>
-                    <h2>생성 진행 중</h2>
-                </div>
-                <div class="progress-bar-container">
-                    <div class="progress-bar">
-                        <div id="progress-fill" class="progress-fill"></div>
-                    </div>
-                    <span id="progress-percent" class="progress-percent">0%</span>
-                </div>
-                <p id="progress-message" class="progress-message">준비 중...</p>
-
-                <!-- Pipeline Steps -->
-                <div class="pipeline-steps">
-                    <div class="step" data-step="script">
-                        <div class="step-indicator"></div>
-                        <span>📝 스크립트 생성</span>
-                    </div>
-                    <div class="step" data-step="images">
-                        <div class="step-indicator"></div>
-                        <span>🎨 이미지 생성</span>
-                    </div>
-                    <div class="step" data-step="narration">
-                        <div class="step-indicator"></div>
-                        <span>🎙️ 나레이션 생성</span>
-                    </div>
-                    <div class="step" data-step="video">
-                        <div class="step-indicator"></div>
-                        <span>🎬 영상 합성</span>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Script Preview Section -->
-            <section id="script-section" class="card script-card hidden">
-                <div class="card-layout">
-                    <!-- Main Editor (Left) -->
-                    <div class="editor-main">
-                        <div class="card-header">
-                            <span class="card-icon">📋</span>
-                            <h2>스크립트 편집 및 확인</h2>
-                        </div>
-
-                        <div id="video-title" class="hidden"></div>
-
-                        <!-- Hook Title Editor -->
-                        <div id="title-edit-container" class="title-edit-container hidden">
-                            <h3 class="editor-sub-title">✨ 첫 장면 후킹 제목 (3초 노출)</h3>
-                            <div class="hook-title-inputs" style="display: flex; gap: 10px; flex-direction: column; margin-top: 10px;">
-                                <div class="input-row" style="display: flex; align-items: center; gap: 10px;">
-                                    <span style="color: #d4ff00; font-weight: bold; width: 80px;">강조(노랑)</span>
-                                    <input type="text" id="hook-title-highlight-input" class="hook-title-input"
-                                        placeholder="노란색 강조 (예: 모두가)" maxlength="13" oninput="handleTitleEdit(event, 'highlight')" style="flex: 1;">
-                                </div>
-                                <div class="input-row" style="display: flex; align-items: center; gap: 10px;">
-                                    <span style="color: #fff; font-weight: bold; width: 80px;">일반(흰색)</span>
-                                    <input type="text" id="hook-title-rest-input" class="hook-title-input"
-                                        placeholder="흰색 일반 (예: 숨죽일 때, ...)" maxlength="18" oninput="handleTitleEdit(event, 'rest')" style="flex: 1;">
-                                </div>
-                                <div class="input-row" style="display: flex; align-items: center; gap: 10px;">
-                                    <span style="color: #d4ff00; font-weight: bold; width: 80px;">주제(박스)</span>
-                                    <input type="text" id="subject-input" class="hook-title-input"
-                                        placeholder="주제어 (2~4자, 예: 역사)" maxlength="6" oninput="handleSubjectEdit(event)" style="flex: 1;">
-                                </div>
+                        
+                        <div class="scene-selector-group">
+                            <label>영상 길이</label>
+                            <div class="scene-toggle">
+                                <button type="button" class="scene-count-option" data-count="8">8장면</button>
+                                <button type="button" class="scene-count-option" data-count="10">10장면</button>
+                                <button type="button" class="scene-count-option active" data-count="12">12장면</button>
                             </div>
                         </div>
+                    </div>
 
-                        <div id="scenes-container" class="scenes-container"></div>
+                    <button id="generate-btn" class="btn-primary btn-large">
+                        다음 단계로 <span class="btn-icon">➜</span>
+                    </button>
+                </div>
+            </section>
 
-                        <!-- Full Audio Upload Section -->
-                        <div class="full-audio-section">
-                            <h3 class="editor-sub-title">🎙️ 전체 음성 파일 업로드 (선택사항)</h3>
-                            <p class="section-hint">외부에서 제작한 전체 나레이션 파일이 있다면 여기에 올려주세요. API 대신 이 파일을 사용합니다.</p>
-                            <div class="audio-upload-wrapper">
-                                <label class="btn-audio-upload">
-                                    <span class="audio-icon">📁</span>
-                                    <span class="audio-text">음성 파일 선택 (.mp3)</span>
-                                    <input type="file" id="full-audio-input" accept="audio/mpeg,audio/mp3"
-                                        onchange="handleFullAudioUpload(event)">
+            <!-- STEP 2: Dual Frame Workspace (Script + Progress) -->
+            <section id="workspace-step" class="step-container hidden">
+                <div class="dual-frame-layout">
+                    <!-- LEFT FRAME: Editor -->
+                    <div class="frame-left editor-frame">
+                        <div class="frame-header">
+                            <h3>📋 대본 및 연출 편집</h3>
+                            <div class="frame-actions">
+                                <button id="back-to-input-btn" class="btn-secondary btn-sm">이전으로</button>
+                                <button id="regenerate-script-btn" class="btn-secondary btn-sm">대본 재생성</button>
+                                <button class="btn-secondary btn-sm" onclick="copyFullScript()">대본 복사</button>
+                            </div>
+                        </div>
+                        
+                        <div class="editor-scroll-area">
+                            <!-- Hook Title Section -->
+                            <div id="title-edit-container" class="title-card">
+                                <div class="editor-label">✨ 타이틀 레이아웃</div>
+                                <div class="title-inputs">
+                                    <label class="title-field">
+                                        <span>훅 제목</span>
+                                        <input type="text" id="hook-title-highlight-input" placeholder="노란색 강조 제목" maxlength="13" oninput="handleTitleEdit()">
+                                    </label>
+                                    <label class="title-field">
+                                        <span>부제목</span>
+                                        <input type="text" id="hook-title-rest-input" placeholder="흰색 일반 제목" maxlength="18" oninput="handleTitleEdit()">
+                                    </label>
+                                    <label class="title-field">
+                                        <span>분류 태그</span>
+                                        <input type="text" id="subject-input" placeholder="예: 경제, 역사, 과학" oninput="handleTitleEdit()">
+                                    </label>
+                                </div>
+                                <div id="script-stats" class="script-stats"></div>
+                            </div>
+
+                            <div id="scenes-container" class="scenes-stack">
+                                <!-- Scenes dynamic content -->
+                            </div>
+
+                            <div class="metadata-card">
+                                <div class="editor-label">🏷️ 유튜브 메타데이터</div>
+                                <label class="title-field">
+                                    <span>제목</span>
+                                    <input type="text" id="youtube-title-input" placeholder="유튜브 제목" oninput="handleMetadataEdit()">
                                 </label>
-                                <div id="full-audio-status" class="audio-status-pill hidden">
-                                    <span class="status-icon">✅</span>
+                                <label class="title-field">
+                                    <span>설명</span>
+                                    <textarea id="youtube-description-input" placeholder="유튜브 설명" oninput="handleMetadataEdit()"></textarea>
+                                </label>
+                                <label class="title-field">
+                                    <span>태그</span>
+                                    <input type="text" id="youtube-tags-input" placeholder="쉼표로 구분된 태그" oninput="handleMetadataEdit()">
+                                </label>
+                            </div>
+
+                            <div class="full-audio-card">
+                                <div class="editor-label">🎙️ 외부 음성 파일 (선택)</div>
+                                <label class="upload-stub">
+                                    <span>파일 선택 (.mp3)</span>
+                                    <input type="file" id="full-audio-input" accept="audio/*" onchange="handleFullAudioUpload(event)">
+                                </label>
+                                <div id="full-audio-status" class="status-pill hidden">
                                     <span class="status-filename">audio.mp3</span>
-                                    <button class="btn-remove-audio" onclick="removeFullAudio()">×</button>
+                                    <button onclick="removeFullAudio()">×</button>
                                 </div>
                             </div>
                         </div>
 
-                        <div class="confirm-actions hidden" id="confirm-actions">
-                            <button id="confirm-generate-btn" class="btn-primary">
-                                <span class="btn-icon">🎬</span>
-                                <span class="btn-text">이대로 영상 만들기</span>
+                        <div class="frame-footer">
+                            <button id="confirm-generate-btn" class="btn-primary btn-full">
+                                🎬 최종 영상 생성하기
                             </button>
-                            <p class="confirm-hint">💡 원하시는 그림이나 직접 찍은 사진을 장면별로 넣을 수도 있습니다.</p>
                         </div>
                     </div>
 
-                    <!-- Sidebar (Right) -->
-                    <aside class="editor-sidebar">
-                        <div class="sidebar-header">
-                            <span class="card-icon">📄</span>
-                            <h3>전체 대본</h3>
-                            <div class="sidebar-header-actions">
-                                <button class="btn-swap-speakers hidden" id="btn-swap-speakers" onclick="swapSpeakerOrder()">🔄 순서 바꾸기</button>
-                                <button class="btn-copy-all" onclick="copyFullScript()">전체 복사</button>
+                    <!-- RIGHT FRAME: Preview & Progress -->
+                    <div class="frame-right status-frame">
+                        <div class="frame-header">
+                            <h3>⚡ 실시간 진행 상황</h3>
+                        </div>
+                        
+                        <div class="status-content">
+                            <!-- Progress Overview -->
+                            <div id="progress-section" class="progress-box">
+                                <div class="progress-top">
+                                    <span id="progress-percent">0%</span>
+                                    <span id="progress-message">준비 중...</span>
+                                </div>
+                                <div class="progress-bar-bg">
+                                    <div id="progress-fill" class="progress-fill"></div>
+                                </div>
+                                
+                                <div class="pipeline-list">
+                                    <div class="pipe-item" data-step="script">📝 스크립트</div>
+                                    <div class="pipe-item" data-step="images">🎨 이미지</div>
+                                    <div class="pipe-item" data-step="narration">🎙️ 나레이션</div>
+                                    <div class="pipe-item" data-step="video">🎬 합성</div>
+                                </div>
+                            </div>
+
+                            <!-- Live Logs -->
+                            <div class="log-window">
+                                <div class="log-title">콘솔 로그 <span id="log-status-dot" class="dot"></span></div>
+                                <div id="realtime-log" class="log-body"></div>
+                            </div>
+
+                            <!-- Result Video (Hidden until ready) -->
+                            <div id="result-section" class="result-box hidden">
+                                <div class="video-preview-wrapper">
+                                    <video id="result-video" controls></video>
+                                </div>
+                                <div class="result-meta-box">
+                                    <div class="result-meta-title" id="result-youtube-title"></div>
+                                    <div class="result-meta-desc" id="result-youtube-description"></div>
+                                    <div class="result-meta-tags" id="result-youtube-tags"></div>
+                                </div>
+                                <div class="result-actions-yt">
+                                    <a id="download-btn" class="btn-yt-action" download>⬇️ 다운로드</a>
+                                    <button id="copy-meta-btn" class="btn-yt-action">🏷️ 메타 복사</button>
+                                    <button id="youtube-upload-btn" class="btn-yt-action red">📹 유튜브 업로드</button>
+                                    <button id="new-video-btn" class="btn-yt-action border">🆕 새 영상</button>
+                                </div>
+                                <div id="upload-status" class="yt-status-msg hidden"></div>
+                            </div>
+
+                            <!-- Error Display -->
+                            <div id="error-section" class="error-box hidden">
+                                <div class="error-icon">⚠️</div>
+                                <p id="error-message"></p>
+                                <button id="retry-btn" class="btn-secondary">다시 시도</button>
                             </div>
                         </div>
-                        <div id="full-script-preview" class="full-script-preview" readonly>
-                            <!-- Concatenated script will go here -->
-                        </div>
-                        <p class="sidebar-hint">위 대본을 복사하여 Supertone Desktop 등에서 음성 파일을 만드실 수 있습니다.</p>
-                    </aside>
+                    </div>
                 </div>
             </section>
 
-            <!-- Result Section -->
-            <section id="result-section" class="card result-card hidden">
-                <div class="card-header">
-                    <span class="card-icon">🎉</span>
-                    <h2>완성된 쇼츠</h2>
+            <!-- HISTORY VIEW (Standalone) -->
+            <section id="history-section" class="step-container hidden">
+                <div class="history-grid-header">
+                    <h2>내 쇼츠 보관함</h2>
+                    <button id="history-refresh-btn" class="btn-secondary btn-sm">새로고침</button>
                 </div>
-                <div class="video-player">
-                    <video id="result-video" controls></video>
+                <div id="history-list" class="history-grid">
+                    <!-- History items -->
                 </div>
-
-                <!-- YouTube Metadata Section (for manual upload) -->
-                <div id="youtube-meta-section" class="youtube-meta hidden">
-                    <div class="meta-header">
-                        <span class="meta-icon">📺</span>
-                        <h3>유튜브 업로드 정보 (수동 업로드 시 참고)</h3>
-                    </div>
-                    <div class="meta-content">
-                        <div class="meta-item">
-                            <label>제목</label>
-                            <div class="copy-group">
-                                <input type="text" id="yt-meta-title" readonly>
-                                <button class="btn-copy" onclick="copyToClipboard('yt-meta-title')">복사</button>
-                            </div>
-                        </div>
-                        <div class="meta-item">
-                            <label>설명 및 태그</label>
-                            <div class="copy-group">
-                                <textarea id="yt-meta-desc" rows="5" readonly></textarea>
-                                <button class="btn-copy" onclick="copyToClipboard('yt-meta-desc')">복사</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="result-actions">
-                    <a id="download-btn" class="btn-primary download-btn" download>
-                        <span class="btn-icon">⬇️</span>
-                        <span class="btn-text">다운로드</span>
-                    </a>
-                    <button id="regenerate-btn" class="btn-secondary">
-                        <span class="btn-icon">🔄</span>
-                        <span class="btn-text">다시 만들기</span>
-                    </button>
-                    <button id="new-video-btn" class="btn-secondary">
-                        <span class="btn-icon">🆕</span>
-                        <span class="btn-text">새 영상 만들기</span>
-                    </button>
-                </div>
-            </section>
-
-            <!-- Error Section -->
-            <section id="error-section" class="card error-card hidden">
-                <div class="card-header">
-                    <span class="card-icon">⚠️</span>
-                    <h2>오류 발생</h2>
-                </div>
-                <p id="error-message" class="error-message"></p>
-                <button id="retry-btn" class="btn-secondary">
-                    <span class="btn-icon">🔄</span>
-                    <span class="btn-text">다시 시도</span>
-                </button>
             </section>
         </main>
 
-        <!-- Footer -->
-        <footer class="footer">
-            <p>Powered by Gemini AI & ElevenLabs</p>
+        <footer class="yt-footer">
+            <p>&copy; 2024 Shorts Studio. Powered by Gemini AI & Supertonic Engine.</p>
         </footer>
     </div>
 
-    <script src="app.js?v=4"></script>
+    <!-- Background Decoration -->
+    <div class="yt-bg-blob"></div>
+
+    <script src="app.js?v=12"></script>
 </body>
 
 </html>

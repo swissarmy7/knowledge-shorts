@@ -52,7 +52,6 @@ interface SceneData {
     };
     characters: CharacterMetadata[];
     scenes: Scene[];
-    bgmPath?: string;
     fullNarrationPath?: string;
 }
 
@@ -60,7 +59,6 @@ interface ShortsVideoProps {
     sceneData?: SceneData;
     scenes?: Scene[];
     videoTitle?: VideoTitle;
-    bgmPath?: string;
     characters?: CharacterMetadata[];
 }
 
@@ -71,7 +69,7 @@ const GET_CHAR_INFO = (charId: string, characters: CharacterMetadata[] = []) => 
 };
 
 // Persistent Header Overlay (Top-Center, Always Visible)
-const HEADER_HEIGHT = 420; // Fixed height for the title frame
+const HEADER_HEIGHT = 280;
 
 const PersistentHeader: React.FC<{ title: VideoTitle }> = ({ title }) => {
     if (!title) return null;
@@ -106,25 +104,25 @@ const PersistentHeader: React.FC<{ title: VideoTitle }> = ({ title }) => {
         }}>
             {/* Top Line (Yellow) */}
             <div style={{
-                fontSize: 100, // Increased from 82
+                fontSize: 68,
                 fontWeight: 900,
                 color: '#d4ff00',
-                fontFamily: "'Noto Sans KR', sans-serif",
+                fontFamily: "'Noto Sans CJK KR', 'NanumGothic', sans-serif",
                 lineHeight: 1.1,
-                marginBottom: 10,
+                marginBottom: 8,
                 textTransform: 'uppercase' as const,
-                letterSpacing: -2
+                letterSpacing: -1
             }}>
                 {highlight}
             </div>
             {/* Bottom Line (White) */}
             <div style={{
-                fontSize: 80, // Increased from 68
+                fontSize: 48,
                 fontWeight: 800,
                 color: '#fff',
-                fontFamily: "'Noto Sans KR', sans-serif",
+                fontFamily: "'Noto Sans CJK KR', 'NanumGothic', sans-serif",
                 lineHeight: 1.1,
-                letterSpacing: -1
+                letterSpacing: -0.5
             }}>
                 {rest}
             </div>
@@ -149,27 +147,24 @@ const SubjectLabel: React.FC<{ subject: string }> = ({ subject }) => {
     return (
         <div style={{
             position: 'absolute',
-            top: HEADER_HEIGHT + 30,
-            right: 40,
+            top: HEADER_HEIGHT + 20,
+            right: 30,
             zIndex: 160,
         }}>
             <div style={{
-                background: 'rgba(0, 0, 0, 0.65)',
-                backdropFilter: 'blur(12px)',
-                padding: '10px 24px',
-                borderRadius: '18px',
-                border: '4px solid #d4ff00',
-                boxShadow: '0 15px 35px rgba(0,0,0,0.4)',
+                background: 'rgba(212, 255, 0, 0.95)',
+                padding: '8px 20px',
+                borderRadius: '12px',
+                boxShadow: '0 10px 30px rgba(0,0,0,0.4)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
             }}>
                 <span style={{
-                    color: '#d4ff00',
-                    fontSize: 42,
+                    color: '#000',
+                    fontSize: 34,
                     fontWeight: 900,
-                    fontFamily: "'Noto Sans KR', sans-serif",
-                    letterSpacing: 1,
+                    fontFamily: "'Noto Sans CJK KR', 'NanumGothic', sans-serif",
                 }}>
                     {subject}
                 </span>
@@ -254,7 +249,7 @@ const MainTitle: React.FC<{ title: string }> = ({ title }) => {
                         fontWeight: 900,
                         color: '#fff', // White text on dark glass
                         lineHeight: 1.1,
-                        fontFamily: "'Noto Sans KR', sans-serif",
+                        fontFamily: "'Noto Sans CJK KR', 'NanumGothic', sans-serif",
                         wordBreak: 'keep-all',
                         letterSpacing: -3,
                         textShadow: '0 5px 20px rgba(0,0,0,0.5)'
@@ -267,7 +262,6 @@ const MainTitle: React.FC<{ title: string }> = ({ title }) => {
     );
 };
 
-// Character name tags for display
 const StyledSubtitle: React.FC<{
     text: string;
     visibleChars: number;
@@ -278,37 +272,22 @@ const StyledSubtitle: React.FC<{
     const visibleText = cleanText.slice(0, visibleChars);
 
     return (
-        <div style={{ textAlign: "center" }}>
-            {/* Character name tag */}
-            <div
-                style={{
-                    display: "inline-block",
-                    padding: "6px 20px",
-                    marginBottom: 16,
-                    borderRadius: 24,
-                    background: `${charInfo.color}33`,
-                    border: `1px solid ${charInfo.color}88`,
-                    fontSize: 32,
-                    fontWeight: 700,
-                    color: charInfo.color,
-                    fontFamily: "'Noto Sans KR', sans-serif",
-                }}
-            >
-                {charInfo.name}
-            </div>
-
-            {/* Main subtitle text */}
+        <div style={{ textAlign: "left", width: '100%' }}>
+            {/* Main subtitle text (Centered-Left) */}
             <div
                 style={{
                     color: "white",
-                    fontSize: 52,
-                    fontWeight: 800,
-                    lineHeight: 1.5,
+                    fontSize: 54,
+                    fontWeight: 900,
+                    lineHeight: 1.4,
                     textShadow:
-                        "0 2px 10px rgba(0,0,0,0.9), 0 0 30px rgba(0,0,0,0.5)",
-                    fontFamily: "'Noto Sans KR', sans-serif",
-                    letterSpacing: -0.5,
+                        "0 4px 12px rgba(0,0,0,0.9), 0 0 40px rgba(0,0,0,0.5)",
+                    fontFamily: "'Noto Sans CJK KR', 'NanumGothic', sans-serif",
+                    letterSpacing: -1,
                     wordBreak: "keep-all" as const,
+                    maxWidth: '85%',
+                    borderLeft: '10px solid #d4ff00',
+                    paddingLeft: 24,
                 }}
             >
                 {visibleText}
@@ -339,6 +318,7 @@ const MOTION_CONFIGS: Record<
     slide: { startScale: 1.05, endScale: 1.05, startX: -50, endX: 50, startY: 0, endY: 0 },
     fade: { startScale: 1.0, endScale: 1.1, startX: 0, endX: 0, startY: 0, endY: 0 },
     bounce: { startScale: 1.0, endScale: 1.15, startX: 0, endX: 0, startY: 10, endY: -20 },
+    slow_push: { startScale: 1.02, endScale: 1.14, startX: 0, endX: 0, startY: 0, endY: -16 },
 };
 
 const POSITION_STYLES: Record<string, React.CSSProperties> = {
@@ -354,6 +334,17 @@ const POSITION_STYLES: Record<string, React.CSSProperties> = {
     },
     "bottom-left": { bottom: 500, left: 60, alignItems: "flex-start" },
     "bottom-right": { bottom: 500, right: 60, alignItems: "flex-end" },
+};
+
+const MAIN_VISUAL_OVERLAY_STYLE: React.CSSProperties = {
+    position: "absolute",
+    top: 40,
+    left: 40,
+    right: 40,
+    bottom: 40,
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
 };
 
 const ImageOverlay: React.FC<{ overlay: Overlay }> = ({ overlay }) => {
@@ -373,7 +364,9 @@ const ImageOverlay: React.FC<{ overlay: Overlay }> = ({ overlay }) => {
         { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
     );
 
-    const posStyle = POSITION_STYLES[overlay.position] || POSITION_STYLES.center;
+    const posStyle = overlay.position === "blackboard"
+        ? MAIN_VISUAL_OVERLAY_STYLE
+        : (POSITION_STYLES[overlay.position] || MAIN_VISUAL_OVERLAY_STYLE);
 
     return (
         <AbsoluteFill
@@ -388,12 +381,9 @@ const ImageOverlay: React.FC<{ overlay: Overlay }> = ({ overlay }) => {
             <Img
                 src={overlay.content ? staticFile(overlay.content) : ""}
                 style={{
-                    width: overlay.position === "center" ? "90%" : "75%", // Force width
-                    maxHeight: "60%", // Allow more vertical space
+                    width: "100%",
+                    height: "100%",
                     objectFit: "contain",
-                    borderRadius: 50,
-                    border: "18px solid white",
-                    boxShadow: "0 60px 120px rgba(0,0,0,0.8)",
                 }}
             />
         </AbsoluteFill>
@@ -461,7 +451,7 @@ const SceneComponent: React.FC<{
 
     return (
         <AbsoluteFill style={{ opacity, backgroundColor: "#000" }}>
-            {/* Scene Image with Ken Burns - Positioned inside the frame below the header */}
+            {/* Main visual stage */}
             <div
                 style={{
                     position: 'absolute',
@@ -469,34 +459,72 @@ const SceneComponent: React.FC<{
                     left: 0,
                     right: 0,
                     bottom: 0,
-                    overflow: "hidden",
+                    background: 'linear-gradient(180deg, #0d1117 0%, #050608 100%)',
                 }}
             >
-                <div style={{
-                    width: '100%',
-                    height: '100%',
-                    transform: `scale(${scale}) translate(${translateX}px, ${translateY}px)`,
-                }}>
-                    <Img
-                        src={scene.imagePath ? staticFile(scene.imagePath) : ""}
-                        style={{
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "cover",
-                        }}
-                    />
-                </div>
-
-                {/* Dark gradient overlay for subtitle readability inside the video area */}
                 <div
                     style={{
                         position: 'absolute',
-                        top: 0,
+                        top: 28,
+                        left: 28,
+                        right: 28,
+                        bottom: 240,
+                        borderRadius: 28,
+                        boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
+                        background: '#0f1720',
+                        overflow: 'hidden',
+                    }}
+                >
+                    <div
+                        style={{
+                            position: 'relative',
+                            width: '100%',
+                            height: '100%',
+                            overflow: "hidden",
+                            borderRadius: 28,
+                            background:
+                                'radial-gradient(circle at 18% 16%, rgba(255,255,255,0.12), transparent 24%), radial-gradient(circle at 82% 12%, rgba(212,255,0,0.08), transparent 20%), #101820',
+                            boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.05)',
+                        }}
+                    >
+                        <div style={{
+                            width: '100%',
+                            height: '100%',
+                            transform: `scale(${scale}) translate(${translateX}px, ${translateY}px)`,
+                        }}>
+                            <Img
+                                src={scene.imagePath ? staticFile(scene.imagePath) : ""}
+                                style={{
+                                    width: "100%",
+                                    height: "100%",
+                                    objectFit: "cover",
+                                }}
+                            />
+                        </div>
+
+                        <div
+                            style={{
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                background:
+                                    "linear-gradient(to top, rgba(0,0,0,0.42) 0%, rgba(0,0,0,0.08) 38%, transparent 68%)",
+                            }}
+                        />
+                    </div>
+                </div>
+
+                <div
+                    style={{
+                        position: 'absolute',
                         left: 0,
                         right: 0,
                         bottom: 0,
+                        height: 250,
                         background:
-                            "linear-gradient(to top, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.5) 25%, rgba(0,0,0,0.1) 45%, transparent 60%)",
+                            'linear-gradient(180deg, rgba(5,6,8,0) 0%, rgba(5,6,8,0.7) 22%, rgba(5,6,8,1) 100%)',
                     }}
                 />
 
@@ -508,10 +536,10 @@ const SceneComponent: React.FC<{
                         right: 0,
                         bottom: 0,
                         justifyContent: "flex-end",
-                        alignItems: "center",
-                        paddingBottom: 200,
-                        paddingLeft: 36,
-                        paddingRight: 36,
+                        alignItems: "flex-start",
+                        paddingBottom: 82,
+                        paddingLeft: 40,
+                        paddingRight: 40,
                         display: 'flex',
                         flexDirection: 'column'
                     }}
@@ -531,16 +559,16 @@ const SceneComponent: React.FC<{
                 </div>
             </div>
 
-            {/* Render Image Overlays - Absolute to the whole screen but visually centered in video area */}
+            {/* Render image overlays inside the main visual area */}
             {scene.overlays
                 ?.filter((ov) => ov.type === "image")
                 .map((ov, i) => (
                     <div key={i} style={{
                         position: 'absolute',
-                        top: HEADER_HEIGHT,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
+                        top: HEADER_HEIGHT + 28,
+                        left: 28,
+                        right: 28,
+                        bottom: 240,
                         pointerEvents: 'none'
                     }}>
                         <ImageOverlay overlay={ov} />
@@ -573,18 +601,6 @@ export const ShortsVideo: React.FC<ShortsVideoProps> = (props) => {
 
     return (
         <AbsoluteFill style={{ backgroundColor: "#000" }}>
-            {/* BGM - low volume background music */}
-            {sceneData.bgmPath && (
-                <Sequence
-                    from={0}
-                    durationInFrames={durationInFrames}
-                    layout="none"
-                    name="BGM"
-                >
-                    <Audio src={sceneData.bgmPath ? staticFile(sceneData.bgmPath) : ""} volume={0.05} loop />
-                </Sequence>
-            )}
-
             {/* Whole Video Narration (User uploaded) */}
             {sceneData.fullNarrationPath && (
                 <Audio src={staticFile(sceneData.fullNarrationPath)} volume={1.2} />

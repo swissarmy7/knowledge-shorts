@@ -48,3 +48,13 @@ client_secrets.json
 .idea/
 *.swp
 *.swo
+
+# Large binaries & logs & temp
+ffmpeg*
+.remotion/
+health_check.log
+duckdns/
+test_job/
+.antigravitycli/
+.codex
+*.bak*

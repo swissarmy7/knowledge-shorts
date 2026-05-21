@@ -1,30 +1,18 @@
 {
   "videoTitle": {
-    "highlight": "세금 혜택은 부자가 더?",
-    "rest": "세금의 충격적 배신"
+    "highlight": "해외여행필수확인사항",
+    "rest": "카드없으면큰일나는꿀팁"
   },
-  "subject": "역설 경제",
-  "situationSetting": {
-    "time_period": "현대",
-    "situation": "경제 전문가와 동료가 세금 정책의 숨겨진 이면과 자산 불평등 심화에 대해 심도 깊은 대화를 나눈다. 고소득층에게 유리한 세금 구조와 저금리 대출 혜택의 불균형에 대한 분석.",
-    "concept": "심층 분석"
-  },
+  "subject": "여행",
+  "situationSetting": {},
   "characters": [
     {
-      "id": "char_teacher",
-      "name": "김민준 세무사",
-      "description": "Male, 30s, wearing a tailored navy blue suit, crisp white shirt, and a subtle patterned tie. Short, neatly styled dark hair, sharp facial features, and intelligent eyes. Clean-shaven.",
-      "voice_category": "male",
-      "age_group": "young-adult",
-      "color": "#2E86C1"
-    },
-    {
-      "id": "char_student",
-      "name": "박지혜 경제 analyst",
-      "description": "Female, 20s, wearing a stylish gray blazer over a black turtleneck, paired with dark-rimmed glasses. Long, straight brown hair neatly parted. A friendly, inquisitive expression.",
-      "voice_category": "female",
-      "age_group": "young-adult",
-      "color": "#A93226"
+      "id": "narrator",
+      "name": "내레이터",
+      "description": "No visible presenter. Visual storytelling only.",
+      "voice_category": "neutral",
+      "age_group": "adult",
+      "color": "#d4ff00"
     }
   ],
   "scenes": [
@@ -32,48 +20,32 @@
       "sceneId": 1,
       "imagePath": "images/scene_1.png",
       "audioPath": "audio/narration_1.mp3",
-      "script": "아직도 뉴스에 나오는 '저소득층 지원금'이 세금 낭비의 주범이라고 생각하세요? 그건 장부에 기록되어 비난받기 딱 좋은 '낙인 찍힌 푼돈'일 뿐입니다. 진짜 거대한 세금의 물줄기는 장부 밖에서 조용히 고소득층으로 흐르고 있어요.",
-      "durationInSeconds": 11.120729,
-      "motion": "손짓하며 설명",
-      "characterId": "char_teacher",
+      "script": "해외여행 가서 카드 결제 거절당한 적 있으신가요. 카드 챙겨갔다고 안심하면 큰일납니다.",
+      "durationInSeconds": 7.6000000000000005,
+      "motion": "slow_push",
+      "characterId": "narrator",
       "volume": 1.0,
-      "overlays": [
-        {
-          "type": "image",
-          "content": "uploads/b0d1583f28624b70baa6aa7f9b7b9f09.png",
-          "position": "center",
-          "startTime": 0,
-          "duration": 6
-        }
-      ]
+      "overlays": []
     },
     {
       "sceneId": 2,
       "imagePath": "images/scene_2.png",
       "audioPath": "audio/narration_2.mp3",
-      "script": "지원금이 푼돈이라니요? 수조 원씩 복지 예산으로 나가는 건 팩트잖아요. 반면에 고소득층은 최고 세율로 세금을 뜯기기만 하는데, 대체 어떤 혜택이 그들에게 더 많이 돌아간다는 거죠?",
-      "durationInSeconds": 8.126625,
-      "motion": "고개를 끄덕이며",
-      "characterId": "char_student",
+      "script": "교통카드 태깅도 안 돼서 당황할 수 있습니다. 오늘은 해외여행 시 카드 사용 꿀팁을 알려드릴게요.",
+      "durationInSeconds": 7.96,
+      "motion": "slow_push",
+      "characterId": "narrator",
       "volume": 1.0,
-      "overlays": [
-        {
-          "type": "image",
-          "content": "uploads/72838487ae2644229aef5e72e5e2fb91.png",
-          "position": "center",
-          "startTime": 0,
-          "duration": 5
-        }
-      ]
+      "overlays": []
     },
     {
       "sceneId": 3,
       "imagePath": "images/scene_3.png",
       "audioPath": "audio/narration_3.mp3",
-      "script": "바로 '조세지출'이라는 함정입니다. 각종 소득공제, 비과세, 소비 할인 혜택은 돈을 쓸 여력이 있는 사람만 받아요. 저소득층은 소비 자체가 적으니 혜택 대상조차 안 되죠. 연봉 1억인 사람이 받는 세금 감면액이 저소득층 지원금보다 절대적으로 큽니다.",
-      "durationInSeconds": 13.586500000000001,
-      "motion": "자료를 보여주며",
-      "characterId": "char_teacher",
+      "script": "가장 먼저, 컨택리스 지원 여부를 확인하세요. 카드에 이 심볼이 있는지 확인하면 됩니다.",
+      "durationInSeconds": 7.48,
+      "motion": "slow_push",
+      "characterId": "narrator",
       "volume": 1.0,
       "overlays": []
     },
@@ -81,10 +53,10 @@
       "sceneId": 4,
       "imagePath": "images/scene_4.png",
       "audioPath": "audio/narration_4.mp3",
-      "script": "세제 혜택은 그렇다 쳐도, 금융은 다르죠. 신용도가 높은 사람이 저금리로 대출받는 건 시장 원리 아닌가요? 국가가 강제로 이자를 깎아주는 것도 아닌데 그걸 세금 혜택이라고 보긴 어렵지 않나요?",
-      "durationInSeconds": 8.676771,
-      "motion": "놀란 표정으로",
-      "characterId": "char_student",
+      "script": "컨택리스 기능이 있다면, 해외에서도 교통카드처럼 편리하게 사용할 수 있습니다.",
+      "durationInSeconds": 6.352,
+      "motion": "slow_push",
+      "characterId": "narrator",
       "volume": 1.0,
       "overlays": []
     },
@@ -92,29 +64,21 @@
       "sceneId": 5,
       "imagePath": "images/scene_5.png",
       "audioPath": "audio/narration_5.mp3",
-      "script": "착각입니다. 은행업은 국가의 허가를 받은 '면허 사업'이고, 국가 정책과 보증으로 저금리 시스템이 유지됩니다. 이 저렴한 자금 조달 혜택을 고소득자만 독점하죠. 반면 저소득층은 고금리 사금융으로 내몰려 자산 형성의 기회 자체를 박탈당합니다.",
-      "durationInSeconds": 12.002604,
-      "motion": "계산기를 두드리며",
-      "characterId": "char_teacher",
+      "script": "다음으로, 해외 겸용 카드인지 확인해야 합니다. 국내 전용 카드는 해외에서 결제가 안 돼요.",
+      "durationInSeconds": 7.5280000000000005,
+      "motion": "slow_push",
+      "characterId": "narrator",
       "volume": 1.0,
-      "overlays": [
-        {
-          "type": "image",
-          "content": "uploads/aa87acb5c44946f58af364a54894324e.png",
-          "position": "center",
-          "startTime": 0,
-          "duration": 7
-        }
-      ]
+      "overlays": []
     },
     {
       "sceneId": 6,
       "imagePath": "images/scene_6.png",
       "audioPath": "audio/narration_6.mp3",
-      "script": "듣고 보니 그렇네요. 국가가 공인한 저금리라는 '사다리'를 특정 계층만 전유하는 셈이군요. 하지만 국가가 닦아놓은 지하철이나 학군 같은 인프라는 모든 국민이 공평하게 누리는 것 아닌가요?\n",
-      "durationInSeconds": 9.397771,
-      "motion": "끄덕이며",
-      "characterId": "char_student",
+      "script": "애플워치나 아이폰으로 교통카드 쓸 때 주의하세요. 승하차 시 같은 기기로 태깅해야 합니다.",
+      "durationInSeconds": 7.744000000000001,
+      "motion": "slow_push",
+      "characterId": "narrator",
       "volume": 1.0,
       "overlays": []
     },
@@ -122,93 +86,24 @@
       "sceneId": 7,
       "imagePath": "images/scene_7.png",
       "audioPath": "audio/narration_7.mp3",
-      "script": "그 인프라를 누릴 '입장료'를 생각해보세요. 역세권과 명문 학군의 가치는 주변 부동산 가격에 고스란히 반영됩니다. 세금으로 가치를 올렸는데, 그 열매는 저렴한 대출로 집을 산 사람이나 부를 물려받은 사람만 자본 이득으로 가져가죠.",
-      "durationInSeconds": 11.579813,
-      "motion": "자료를 가리키며",
-      "characterId": "char_teacher",
+      "script": "다르면 중복으로 요금이 부과될 수 있습니다. 꼭 같은 기기를 사용하세요.",
+      "durationInSeconds": 6.208,
+      "motion": "slow_push",
+      "characterId": "narrator",
       "volume": 1.0,
-      "overlays": [
-        {
-          "type": "image",
-          "content": "uploads/838ec03f8a29489bb83da091d48fffd2.png",
-          "position": "center",
-          "startTime": 0,
-          "duration": 6
-        }
-      ]
+      "overlays": []
     },
     {
       "sceneId": 8,
       "imagePath": "images/scene_8.png",
       "audioPath": "audio/narration_8.mp3",
-      "script": "결국 저소득층의 세금도 인프라 건설에 들어갔지만, 그로 인한 자산 가치 상승분에서는 철저히 소외된다는 말씀이네요. 투자를 하고 싶어도 대출 한도가 적고 이자가 비싸니 성장의 흐름에 올라탈 수가 없군요.",
-      "durationInSeconds": 9.624271,
-      "motion": "심각한 표정으로",
-      "characterId": "char_student",
-      "volume": 1.0,
-      "overlays": [
-        {
-          "type": "image",
-          "content": "uploads/b454a18a9788457b8917fa707d7fa1e4.png",
-          "position": "center",
-          "startTime": 0,
-          "duration": 5
-        }
-      ]
-    },
-    {
-      "sceneId": 9,
-      "imagePath": "images/scene_9.png",
-      "audioPath": "audio/narration_9.mp3",
-      "script": "시스템이 그렇게 설계되어 있어요. 그런데 미디어는 아주 작은 저소득층 지원금만 부각하며 '포퓰리즘'이라 비난하죠. 국민들이 서로 싸우는 동안, 보이지 않는 거대한 혜택은 중간 허리 이상 계층의 자산을 불리는 데 쓰입니다.",
-      "durationInSeconds": 10.833417,
-      "motion": "손을 들어 강조하며",
-      "characterId": "char_teacher",
-      "volume": 1.0,
-      "overlays": []
-    },
-    {
-      "sceneId": 10,
-      "imagePath": "images/scene_10.png",
-      "audioPath": "audio/narration_10.mp3",
-      "script": "우리가 푼돈을 두고 싸우는 사이에, 국가 시스템이 만든 진짜 '꿀'은 대출 사다리를 탄 사람들에게만 압도적으로 쏠리고 있었네요. 이건 단순히 복지의 문제가 아니라 구조적 불평등의 핵심이군요.",
-      "durationInSeconds": 8.846917,
-      "motion": "생각에 잠기며",
-      "characterId": "char_student",
-      "volume": 1.0,
-      "overlays": [
-        {
-          "type": "image",
-          "content": "uploads/2e000c33603545e1b119e8b5e659719a.png",
-          "position": "center",
-          "startTime": 0,
-          "duration": 5
-        }
-      ]
-    },
-    {
-      "sceneId": 11,
-      "imagePath": "images/scene_11.png",
-      "audioPath": "audio/narration_11.mp3",
-      "script": "포퓰리즘이라는 프레임에 갇혀 본질을 놓치지 말아야겠네요. 세금이 모두를 위한 진정한 사다리가 될 수 있도록, 우리 모두가 시스템 개선의 주체가 되어야 할 때입니다.",
-      "durationInSeconds": 7.561896,
-      "motion": "미소 지으며",
-      "characterId": "char_teacher",
-      "volume": 1.0,
-      "overlays": []
-    },
-    {
-      "sceneId": 12,
-      "imagePath": "images/scene_12.png",
-      "audioPath": "audio/narration_12.mp3",
-      "script": "세금의 이면, 이제 좀 보이시나요? 구독하고 더 많은 경제 이야기를 알아가세요!",
-      "durationInSeconds": 4.551167,
-      "motion": "구독을 유도하며",
-      "characterId": "char_teacher",
+      "script": "컨택리스를 지원해도, 안 되는 곳도 있습니다. 현금도 꼭 챙겨가세요. 알고 있었다면 댓글.",
+      "durationInSeconds": 7.5280000000000005,
+      "motion": "slow_push",
+      "characterId": "narrator",
       "volume": 1.0,
       "overlays": []
     }
   ],
-  "bgmPath": "bgm.mp3",
   "fullNarrationPath": null
 }

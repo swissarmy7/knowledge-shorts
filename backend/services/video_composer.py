@@ -3,17 +3,52 @@ Video Composer Service
 Uses Remotion to compose final video with animations.
 Falls back to FFmpeg if Remotion is not available.
 """
+import os
+import re
 import json
 import shutil
+import asyncio
 import subprocess
 from pathlib import Path
-from backend.config import OUTPUT_DIR, VIDEO_WIDTH, VIDEO_HEIGHT, BASE_DIR, REMOTION_CODEC, REMOTION_CONCURRENCY
+from typing import Optional
+from backend.config import (
+    OUTPUT_DIR,
+    VIDEO_WIDTH,
+    VIDEO_HEIGHT,
+    BASE_DIR,
+    REMOTION_CODEC,
+    REMOTION_CONCURRENCY,
+    REMOTION_BROWSER_EXECUTABLE,
+    REMOTION_CHROME_MODE,
+)
 
 # Remotion project directory
 VIDEO_ENGINE_DIR = BASE_DIR / "video-engine"
 
-# BGM file
-BGM_PATH = BASE_DIR / "Sakura_Serenade.mp3"
+
+def _resolve_remotion_browser_executable() -> Optional[str]:
+    """Prefer an explicitly configured browser, otherwise let Remotion manage it."""
+    if REMOTION_BROWSER_EXECUTABLE:
+        browser_path = Path(REMOTION_BROWSER_EXECUTABLE)
+        if browser_path.exists():
+            return str(browser_path)
+
+        print(
+            f"⚠️ [Remotion] Configured browser executable not found: {browser_path}. "
+            "Falling back to Remotion-managed browser."
+        )
+
+    remotion_browser_candidates = [
+        VIDEO_ENGINE_DIR / "node_modules" / ".remotion" / "chrome-for-testing" / "linux-arm64" / "chrome-headless-shell-linux-arm64" / "chrome-headless-shell",
+        VIDEO_ENGINE_DIR / "node_modules" / ".remotion" / "chrome-for-testing" / "linux64" / "chrome-linux64" / "chrome",
+        VIDEO_ENGINE_DIR / "node_modules" / ".remotion" / "chrome-headless-shell" / "linux-arm64" / "chrome-headless-shell-linux-arm64" / "headless_shell",
+        VIDEO_ENGINE_DIR / "node_modules" / ".remotion" / "chrome-headless-shell" / "linux64" / "chrome-headless-shell-linux64" / "chrome-headless-shell",
+    ]
+    for candidate in remotion_browser_candidates:
+        if candidate.exists():
+            return str(candidate)
+
+    return None
 
 
 async def compose_video(
@@ -23,8 +58,11 @@ async def compose_video(
     job_dir: Path,
     job_id: str,
     scenes_metadata: dict = None,
+    progress_callback: callable = None,
 ) -> str:
     """Compose final video using Remotion."""
+    if progress_callback:
+        progress_callback(0, "🎬 영상 합성 준비 중...")
 
     # Prepare Remotion public directory with assets
     public_dir = VIDEO_ENGINE_DIR / "public"
@@ -34,13 +72,6 @@ async def compose_video(
     images_dir.mkdir(parents=True, exist_ok=True)
     audio_dir.mkdir(parents=True, exist_ok=True)
     uploads_dir.mkdir(parents=True, exist_ok=True)
-
-    # Copy BGM to public folder
-    bgm_path_rel = None
-    if BGM_PATH.exists():
-        bgm_dst = public_dir / "bgm.mp3"
-        shutil.copy2(str(BGM_PATH), str(bgm_dst))
-        bgm_path_rel = "bgm.mp3"
 
     # Copy Full Narration if exists
     full_narration_rel = None
@@ -133,7 +164,6 @@ async def compose_video(
         "situationSetting": scenes_metadata.get("situation_setting", {}),
         "characters": scenes_metadata.get("characters", []),
         "scenes": scene_data_list,
-        "bgmPath": bgm_path_rel,
         "fullNarrationPath": full_narration_rel,
     }
 
@@ -156,50 +186,112 @@ async def compose_video(
             if ov.get("type") == "image":
                 ov_path = public_dir / ov["content"]
                 print(f"    📷 Upload: {ov['content']} (exists: {ov_path.exists()})")
-    if bgm_path_rel:
-        bgm_check = public_dir / bgm_path_rel
-        print(f"  🎵 BGM: {bgm_check} (exists: {bgm_check.exists()})")
-
-    # Render with Remotion CLI
+    # Render with Remotion CLI (Async for progress parsing)
     try:
         # Use relative path for --props since CWD is VIDEO_ENGINE_DIR
         props_rel = scene_data_path.relative_to(VIDEO_ENGINE_DIR)
 
-        result = subprocess.run(
-            [
-                "npx", "remotion", "render",
-                "ShortsVideo",
-                str(output_path),
-                "--codec", REMOTION_CODEC,
-                "--gl", "angle",
-                "--props", str(props_rel),
-                
-                "--log=verbose",
-            ],
-            cwd=str(VIDEO_ENGINE_DIR),
-            capture_output=True,
-            timeout=300,  # 5 min timeout
-            shell=True,
-            encoding="utf-8",
-            errors="replace",
+        browser_executable = _resolve_remotion_browser_executable()
+
+        # Construct the command string for shell execution
+        browser_executable_arg = f"--browser-executable {browser_executable}" if browser_executable else ""
+        
+        cmd_str = (
+            f"xvfb-run -a npx remotion render "
+            f"ShortsVideo "
+            f"{output_path} "
+            f"--codec {REMOTION_CODEC} "
+            f"--props {props_rel} "
+            f"--headless=new "
+            f"--chrome-mode {REMOTION_CHROME_MODE} "
+            f"{browser_executable_arg}"
         )
 
-        if result.returncode != 0:
-            print(f"❌ Remotion render failed with exit code {result.returncode}")
-            # Print last 2000 chars of output to avoid flooding logs
-            stdout_tail = (result.stdout or "")[-2000:]
-            stderr_tail = (result.stderr or "")[-2000:]
-            print(f"Stdout (tail): {stdout_tail}")
-            print(f"Stderr (tail): {stderr_tail}")
-            # Fall back to FFmpeg
+        print(f"🎬 [Remotion] Executing (shell): {cmd_str}")
+        if progress_callback:
+            progress_callback(0.05, "🎬 렌더링 엔진 초기화 중...")
+
+        # Inject environment variables
+        render_env = os.environ.copy()
+        render_env["REMOTION_HEADLESS_MODE"] = "new"
+        render_env["REMOTION_CHROME_MODE"] = REMOTION_CHROME_MODE
+        render_env["PUPPETEER_SKIP_CHROMIUM_DOWNLOAD"] = "true"
+        if browser_executable:
+            render_env["REMOTION_BROWSER_EXECUTABLE"] = browser_executable
+
+        process = await asyncio.create_subprocess_shell(
+            cmd_str,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(VIDEO_ENGINE_DIR),
+            env=render_env
+        )
+
+        total_frames = 1
+        current_frame = 0
+        last_progress_bucket = -1
+
+        # Pattern to match progress in Remotion output
+        frame_pattern = re.compile(r"(\d+)/(\d+)")
+
+        async def stream_reader(stream, is_stderr=False):
+            nonlocal total_frames, current_frame, last_progress_bucket
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                line_text = line.decode("utf-8", errors="replace").strip()
+                if line_text:
+                    if not is_stderr: 
+                        print(f"  [Remotion] {line_text}")
+                    else: 
+                        print(f"  [Remotion Err] {line_text}")
+                    
+                    # Parse progress if callback provided
+                    if progress_callback:
+                        match = frame_pattern.search(line_text)
+                        if match:
+                            current_frame = int(match.group(1))
+                            total_frames = int(match.group(2))
+                            if total_frames > 0:
+                                percent = current_frame / total_frames
+                                bucket = min(100, int(percent * 100) // 5 * 5)
+                                if bucket > last_progress_bucket:
+                                    last_progress_bucket = bucket
+                                    progress_callback(
+                                        percent,
+                                        f"🎬 영상 프레임 렌더링 중... {bucket}% ({current_frame}/{total_frames})",
+                                    )
+                        elif "Copying" in line_text or "Encoding" in line_text:
+                            progress_callback(
+                                current_frame / total_frames if total_frames > 0 else 0.8,
+                                f"🎬 {line_text}",
+                            )
+
+        # Process stdout and stderr concurrently
+        await asyncio.gather(
+            stream_reader(process.stdout),
+            stream_reader(process.stderr, is_stderr=True)
+        )
+
+        return_code = await process.wait()
+
+        if return_code != 0:
+            print(f"❌ Remotion render failed with exit code {return_code}")
             return await _compose_with_ffmpeg(
                 scenes, images, narrations, job_dir, job_id
             )
 
         print(f"✅ [Remotion] Render successful: {output_path}")
+        if progress_callback:
+            progress_callback(0.98, "🎬 YouTube 호환 포맷으로 변환 중...")
+        await _reencode_for_youtube(output_path)
+        if progress_callback:
+            progress_callback(1.0, "🎬 렌더링 완료!")
+
         return str(output_path)
 
-    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+    except (asyncio.TimeoutError, FileNotFoundError) as e:
         print(f"❌ Remotion failed ({e}), falling back to FFmpeg")
         return await _compose_with_ffmpeg(
             scenes, images, narrations, job_dir, job_id
@@ -214,6 +306,37 @@ async def compose_video(
         _cleanup_public(images_dir, audio_dir)
 
 
+async def _reencode_for_youtube(video_path: Path) -> None:
+    """Re-encode with YouTube Shorts-compatible settings.
+
+    Remotion outputs yuvj420p (full-range) with bt470bg color space, which causes
+    YouTube to misinterpret the video and apply incorrect scaling/cropping.
+    This step converts to yuv420p (limited-range) + BT.709 — the standard for
+    1080p web video — so YouTube renders it at the correct size without cropping.
+    """
+    temp_path = video_path.with_suffix(".yt.mp4")
+    cmd = [
+        "ffmpeg", "-y", "-i", str(video_path),
+        "-vf", "format=yuv420p",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "17",
+        "-colorspace", "bt709",
+        "-color_primaries", "bt709",
+        "-color_trc", "bt709",
+        "-color_range", "tv",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+        "-movflags", "+faststart",
+        str(temp_path),
+    ]
+    result = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True)
+    if result.returncode == 0 and temp_path.exists():
+        temp_path.replace(video_path)
+        print(f"✅ [YouTube] Re-encoded for compatibility: {video_path.name}")
+    else:
+        print(f"⚠️ [YouTube] Re-encode failed (keeping original): {result.stderr[-300:]}")
+        if temp_path.exists():
+            temp_path.unlink()
+
+
 def _cleanup_public(images_dir: Path, audio_dir: Path):
     """Clean up copied assets from Remotion public dir."""
     try:
@@ -224,10 +347,6 @@ def _cleanup_public(images_dir: Path, audio_dir: Path):
         full_n = audio_dir.parent / "full_narration.mp3"
         if full_n.exists():
             full_n.unlink()
-        bgm = images_dir.parent / "bgm.mp3"
-        if bgm.exists():
-            bgm.unlink()
-        
         # Clean up uploads in public
         uploads_dir = images_dir.parent / "uploads"
         if uploads_dir.exists():
@@ -302,31 +421,29 @@ async def _compose_with_ffmpeg(
 
     filter_complex += f"{concat_parts}concat=n={n}:v=1:a=1[outv][outa]"
 
-    # Mix BGM at low volume if available
-    if BGM_PATH.exists():
-        input_args.extend(["-stream_loop", "-1", "-i", str(BGM_PATH)])
-        bgm_idx = n * 2
-        filter_complex += f";[{bgm_idx}:a]volume=0.05[bgm];[outa][bgm]amix=inputs=2:duration=first[finala]"
-        map_audio = "[finala]"
-    else:
-        map_audio = "[outa]"
-
     cmd = [
         "ffmpeg", "-y",
         *input_args,
         "-filter_complex", filter_complex,
         "-map", "[outv]",
-        "-map", map_audio,
+        "-map", "[outa]",
         "-c:v", "libx264",
         "-preset", "fast",
-        "-crf", "23",
+        "-crf", "18",
+        "-pix_fmt", "yuv420p",
+        "-colorspace", "bt709",
+        "-color_primaries", "bt709",
+        "-color_trc", "bt709",
+        "-color_range", "tv",
         "-c:a", "aac",
-        "-b:a", "128k",
+        "-b:a", "192k",
+        "-ar", "48000",
+        "-movflags", "+faststart",
         "-shortest",
         str(output_path),
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    result = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True, timeout=300)
 
     if result.returncode != 0:
         # Capture more stderr and filter out the ubiquitous version/config header

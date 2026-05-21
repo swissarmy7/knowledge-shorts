@@ -1,1252 +1,720 @@
 /**
- * AI Shorts Generator - Frontend App
+ * AI Shorts Studio - Frontend App (YouTube Layout Edition)
  */
-const API_BASE = window.location.origin;
+const APP_BASE = new URL('.', window.location.href);
 let currentJobId = null;
 let pollInterval = null;
-let currentScriptData = null; // Store script data for multi-step flow
+let currentScriptData = null; 
+let currentHistoryId = null;
+const ACTIVE_JOB_STORAGE_KEY = 'active_shorts_job_id';
 
-// DOM Elements
-const topicInput = document.getElementById('topic-input');
-const directionInput = document.getElementById('direction-input');
-const tagsInput = document.getElementById('tags-input');
-const generateBtn = document.getElementById('generate-btn');
-const progressSection = document.getElementById('progress-section');
-const inputSection = document.getElementById('input-section');
-const scriptSection = document.getElementById('script-section');
-const resultSection = document.getElementById('result-section');
-const errorSection = document.getElementById('error-section');
-const appContainer = document.getElementById('app-container');
-const progressFill = document.getElementById('progress-fill');
-const progressPercent = document.getElementById('progress-percent');
-const progressMessage = document.getElementById('progress-message');
-const videoTitle = document.getElementById('video-title');
-const scenesContainer = document.getElementById('scenes-container');
-const resultVideo = document.getElementById('result-video');
-const downloadBtn = document.getElementById('download-btn');
-const newVideoBtn = document.getElementById('new-video-btn');
-const retryBtn = document.getElementById('retry-btn');
-const errorMessage = document.getElementById('error-message');
-const confirmActions = document.getElementById('confirm-actions');
-const confirmGenerateBtn = document.getElementById('confirm-generate-btn');
-const regenerateBtn = document.getElementById('regenerate-btn');
-const titleEditContainer = document.getElementById('title-edit-container');
-const hookTitleHighlightInput = document.getElementById('hook-title-highlight-input');
-const hookTitleRestInput = document.getElementById('hook-title-rest-input');
-const fullScriptPreview = document.getElementById('full-script-preview');
-const fullAudioInput = document.getElementById('full-audio-input');
-const fullAudioStatus = document.getElementById('full-audio-status');
-const styleOptions = document.querySelectorAll('.style-option');
-const sceneCountOptions = document.querySelectorAll('.scene-count-option');
-const modeAiTab = document.getElementById('mode-ai-tab');
-const modeManualTab = document.getElementById('mode-manual-tab');
-const aiModeContent = document.getElementById('ai-mode-content');
-const manualModeContent = document.getElementById('manual-mode-content');
-const manualSituationInput = document.getElementById('manual-situation-input');
-let selectedStyle = 'teacher-student'; // Default style
-let selectedSceneCount = 12; // Default scene count
-let inputMode = 'ai'; // 'ai' or 'manual'
+function buildAppUrl(path = '') {
+    return new URL(String(path).replace(/^\/+/, ''), APP_BASE).toString();
+}
 
-// Login Elements
+// DOM Elements - Auth
 const loginOverlay = document.getElementById('login-overlay');
 const loginPassword = document.getElementById('login-password');
 const loginBtn = document.getElementById('login-btn');
 const loginError = document.getElementById('login-error');
+const appContainer = document.getElementById('app-container');
+
+// DOM Elements - Steps
+const inputStep = document.getElementById('input-step');
+const workspaceStep = document.getElementById('workspace-step');
+const historySection = document.getElementById('history-section');
+
+// DOM Elements - Inputs
+const topicInput = document.getElementById('topic-input');
+const directionInput = document.getElementById('direction-input');
+const tagsInput = document.getElementById('tags-input');
+const generateBtn = document.getElementById('generate-btn');
+const sceneCountOptions = document.querySelectorAll('.scene-count-option');
+
+// DOM Elements - Editor
+const scenesContainer = document.getElementById('scenes-container');
+const hookTitleHighlightInput = document.getElementById('hook-title-highlight-input');
+const hookTitleRestInput = document.getElementById('hook-title-rest-input');
+const subjectInput = document.getElementById('subject-input');
+const scriptStats = document.getElementById('script-stats');
+const youtubeTitleInput = document.getElementById('youtube-title-input');
+const youtubeDescriptionInput = document.getElementById('youtube-description-input');
+const youtubeTagsInput = document.getElementById('youtube-tags-input');
+const fullAudioStatus = document.getElementById('full-audio-status');
+const confirmGenerateBtn = document.getElementById('confirm-generate-btn');
+const backToInputBtn = document.getElementById('back-to-input-btn');
+const regenerateScriptBtn = document.getElementById('regenerate-script-btn');
+
+// DOM Elements - Progress & Result
+const progressSection = document.getElementById('progress-section');
+const progressFill = document.getElementById('progress-fill');
+const progressPercent = document.getElementById('progress-percent');
+const progressMessage = document.getElementById('progress-message');
+const realtimeLog = document.getElementById('realtime-log');
+const logStatusDot = document.getElementById('log-status-dot');
+const resultSection = document.getElementById('result-section');
+const resultVideo = document.getElementById('result-video');
+const resultYoutubeTitle = document.getElementById('result-youtube-title');
+const resultYoutubeDescription = document.getElementById('result-youtube-description');
+const resultYoutubeTags = document.getElementById('result-youtube-tags');
+const copyMetaBtn = document.getElementById('copy-meta-btn');
+const downloadBtn = document.getElementById('download-btn');
+const youtubeUploadBtn = document.getElementById('youtube-upload-btn');
+const newVideoBtn = document.getElementById('new-video-btn');
+const retryBtn = document.getElementById('retry-btn');
+const errorSection = document.getElementById('error-section');
+const errorMessage = document.getElementById('error-message');
+
+// DOM Elements - Nav
+const navCreateBtn = document.getElementById('nav-create-btn');
+const navHistoryBtn = document.getElementById('nav-history-btn');
+const historyList = document.getElementById('history-list');
+const historyRefreshBtn = document.getElementById('history-refresh-btn');
+const logoHome = document.getElementById('logo-home');
+const menuBtn = document.querySelector('.menu-btn');
+
+let selectedSceneCount = 12;
+let lastMessage = "";
 
 /**
- * Handle Login
+ * Navigation Helpers
+ */
+function showStep(stepId) {
+    [inputStep, workspaceStep, historySection].forEach(el => el.classList.add('hidden'));
+    const target = document.getElementById(stepId);
+    if (target) target.classList.remove('hidden');
+    
+    // Update nav active state
+    navCreateBtn.classList.toggle('active', stepId !== 'history-section');
+    navHistoryBtn.classList.toggle('active', stepId === 'history-section');
+}
+
+function resetUI() {
+    if (currentScriptData && !confirm('진행 중인 작업이 사라집니다. 정말 처음으로 돌아갈까요?')) return;
+    
+    currentJobId = null;
+    currentScriptData = null;
+    currentHistoryId = null;
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = null;
+    
+    topicInput.value = '';
+    directionInput.value = '';
+    tagsInput.value = '';
+    hookTitleHighlightInput.value = '';
+    hookTitleRestInput.value = '';
+    subjectInput.value = '';
+    youtubeTitleInput.value = '';
+    youtubeDescriptionInput.value = '';
+    youtubeTagsInput.value = '';
+    resultVideo.removeAttribute('src');
+    resultYoutubeTitle.textContent = '';
+    resultYoutubeDescription.textContent = '';
+    resultYoutubeTags.textContent = '';
+    resetSteps();
+    
+    showStep('input-step');
+    resultSection.classList.add('hidden');
+    progressSection.classList.remove('hidden'); 
+    errorSection.classList.add('hidden');
+}
+
+function resetGenerateButton() {
+    if (!confirmGenerateBtn) return;
+    confirmGenerateBtn.disabled = false;
+    confirmGenerateBtn.textContent = '🎬 최종 영상 생성하기';
+}
+
+/**
+ * Authentication
  */
 async function handleLogin() {
     const password = loginPassword.value;
     if (!password) return;
-
-    loginBtn.disabled = true;
-    loginBtn.classList.add('loading');
-    loginError.classList.add('hidden');
-
     try {
-        const response = await fetch(`${API_BASE}/api/login`, {
+        const response = await fetch(buildAppUrl('api/login'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ password }),
         });
-
         if (response.ok) {
             const data = await response.json();
             localStorage.setItem('auth_token', data.access_token);
             loginOverlay.classList.add('hidden');
             appContainer.classList.remove('hidden');
-            console.log('[Auth] Logged in successfully');
+            initializeAfterAuth();
         } else {
+            const data = await response.json().catch(() => ({}));
+            loginError.textContent = data.detail || '비밀번호가 올바르지 않습니다.';
             loginError.classList.remove('hidden');
         }
     } catch (err) {
-        console.error('[Auth] Login error:', err);
         loginError.textContent = '서버 연결 오류';
         loginError.classList.remove('hidden');
-    } finally {
-        loginBtn.disabled = false;
-        loginBtn.classList.remove('loading');
     }
 }
 
-/**
- * Check Initial Auth
- */
 async function checkAuth() {
     const token = localStorage.getItem('auth_token');
-    if (!token) {
-        loginOverlay.classList.remove('hidden');
-        appContainer.classList.add('hidden');
-        return;
-    }
-
+    if (!token) return;
     try {
-        const response = await fetch(`${API_BASE}/api/auth-check`, {
+        const response = await fetch(buildAppUrl('api/auth-check'), {
             headers: { 'Authorization': `Bearer ${token}` }
         });
-
         if (response.ok) {
             loginOverlay.classList.add('hidden');
             appContainer.classList.remove('hidden');
-            console.log('[Auth] Session active');
-        } else {
-            console.warn('[Auth] Session expired');
-            localStorage.removeItem('auth_token');
-            loginOverlay.classList.remove('hidden');
-            appContainer.classList.add('hidden');
+            initializeAfterAuth();
         }
-    } catch (err) {
-        console.error('[Auth] Check failed:', err);
-        loginOverlay.classList.remove('hidden');
-    }
+    } catch (e) {}
+}
+
+async function initializeAfterAuth() {
+    await loadHistory();
 }
 
 /**
- * Fetch wrapper with Auth header
- */
-async function fetchWithAuth(url, options = {}) {
-    const token = localStorage.getItem('auth_token');
-    if (!options.headers) options.headers = {};
-    if (token) {
-        options.headers['Authorization'] = `Bearer ${token}`;
-    }
-
-    const response = await fetch(url, options);
-    
-    // Auto logout on 401
-    if (response.status === 401) {
-        console.warn('[Auth] 401 Unauthorized - logging out');
-        localStorage.removeItem('auth_token');
-        loginOverlay.classList.remove('hidden');
-        appContainer.classList.add('hidden');
-        throw new Error('인증이 만료되었습니다. 다시 로그인해주세요.');
-    }
-    
-    return response;
-}
-
-// Event Listeners
-loginBtn.addEventListener('click', handleLogin);
-loginPassword.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') handleLogin();
-});
-
-// Check auth on page load
-window.addEventListener('DOMContentLoaded', checkAuth);
-
-/**
- * Update the sidebar with concatenated script content for easy copy-pasting
- */
-function updateFullScriptSidebar() {
-    if (!currentScriptData || !fullScriptPreview) return;
-
-    const getTitleStr = (vt) => typeof vt === 'object' ? `${vt.highlight || ''} ${vt.rest || ''}`.trim() : vt;
-    const title = getTitleStr(currentScriptData.video_title) || '제목 없음';
-    const subject = currentScriptData.subject || '미분류';
-
-    let fullText = `제목: ${title}\n주제: ${subject}\n\n`;
-    fullText += "━━━━━━━━━━━━━━━━━━━━━━\n\n";
-    fullText += currentScriptData.scenes
-        .map(scene => `[${scene.character}] ${scene.script}`)
-        .join('\n\n');
-
-    fullScriptPreview.textContent = fullText;
-}
-
-/**
- * Copy the entire content from the sidebar to clipboard
- */
-function copyFullScript() {
-    if (!fullScriptPreview) return;
-    const text = fullScriptPreview.textContent;
-    navigator.clipboard.writeText(text).then(() => {
-        const btn = document.querySelector('.btn-copy-all');
-        const originalText = btn.textContent;
-        btn.textContent = '✅ 복사됨';
-        setTimeout(() => btn.textContent = originalText, 2000);
-    }).catch(err => {
-        console.error('Copy failed:', err);
-        alert('복사 실패!');
-    });
-}
-
-// Event Listeners
-generateBtn.addEventListener('click', () => {
-    if (inputMode === 'manual') {
-        generateManualScript();
-    } else {
-        startScriptGeneration();
-    }
-});
-confirmGenerateBtn.addEventListener('click', startVideoGeneration);
-newVideoBtn.addEventListener('click', resetUI);
-regenerateBtn.addEventListener('click', () => {
-    // Reset video player to avoid showing stale content
-    resultVideo.src = '';
-    resultVideo.load();
-    downloadBtn.href = '#';
-
-    // Clear old job ID
-    currentJobId = null;
-
-    resultSection.classList.add('hidden');
-    startVideoGeneration();
-});
-retryBtn.addEventListener('click', handleRetry);
-
-// Style Selection Toggle
-styleOptions.forEach(option => {
-    option.addEventListener('click', () => {
-        styleOptions.forEach(opt => opt.classList.remove('active'));
-        option.classList.add('active');
-        selectedStyle = option.dataset.style;
-        console.log('[UI] Style selected:', selectedStyle);
-    });
-});
-
-// Scene Count Selection
-sceneCountOptions.forEach(option => {
-    option.addEventListener('click', () => {
-        sceneCountOptions.forEach(opt => opt.classList.remove('active'));
-        option.classList.add('active');
-        selectedSceneCount = parseInt(option.dataset.count);
-        console.log('[UI] Scene count selected:', selectedSceneCount);
-    });
-});
-
-// Input Mode Tab Toggle
-[modeAiTab, modeManualTab].forEach(tab => {
-    tab.addEventListener('click', () => {
-        const mode = tab.dataset.mode;
-        inputMode = mode;
-        modeAiTab.classList.toggle('active', mode === 'ai');
-        modeManualTab.classList.toggle('active', mode === 'manual');
-        aiModeContent.classList.toggle('hidden', mode !== 'ai');
-        manualModeContent.classList.toggle('hidden', mode !== 'manual');
-        console.log('[UI] Input mode:', mode);
-    });
-});
-
-topicInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') startScriptGeneration();
-});
-
-/**
- * Step 1: Generate Script only
+ * Script Generation (Step 1 -> Step 2 transition)
  */
 async function startScriptGeneration() {
     const topic = topicInput.value.trim();
     if (!topic) {
         topicInput.focus();
-        topicInput.style.borderColor = 'var(--error)';
-        setTimeout(() => topicInput.style.borderColor = '', 1500);
         return;
     }
 
-    const tags = tagsInput.value.split(',').map(t => t.trim()).filter(t => t);
-    const direction = directionInput.value.trim();
-
-    // Disable input
-    generateBtn.disabled = true;
-    generateBtn.classList.add('loading');
-
-    // Show progress
-    inputSection.classList.add('hidden');
-    progressSection.classList.remove('hidden');
+    currentJobId = null;
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = null;
+    resetSteps();
     resultSection.classList.add('hidden');
     errorSection.classList.add('hidden');
-    scriptSection.classList.add('hidden');
-    resetSteps();
-
-    try {
-        console.log('[Script] Generating...', { topic });
-        progressMessage.textContent = '📝 스크립트 생성 중...';
-        progressFill.style.width = '20%';
-        progressPercent.textContent = '20%';
-
-        const response = await fetchWithAuth(`${API_BASE}/api/generate-script`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ topic, tags, direction, style: selectedStyle, scene_count: selectedSceneCount }),
-        });
-
-        if (!response.ok) throw new Error(`스크립트 생성 실패 (${response.status})`);
-
-        const data = await response.json();
-        if (data.error) throw new Error(data.error);
-
-        currentScriptData = data.script_data;
-        showScriptPreview(currentScriptData);
-
-        // Hide progress and show script preview
-        progressSection.classList.add('hidden');
-        scriptSection.classList.remove('hidden');
-    } catch (err) {
-        console.error('[Script] Error:', err);
-        showError(`스크립트 생성 실패: ${err.message}`);
-    } finally {
-        generateBtn.disabled = false;
-        generateBtn.classList.remove('loading');
-    }
-}
-
-/**
- * Parse character names from a situation description string
- * e.g. "고속도로에서 단속된 운전자와 경찰이 대화하는 상황" → ['운전자', '경찰']
- * Returns null if we can't parse two distinct names
- */
-function parseCharactersFromSituation(situation) {
-    if (!situation) return null;
-
-    // 1. Try to match specific "Name (A): Description" and "Name (B): Description" pattern
-    // This handles the format you provided: "지수 (A): 30대 직장인..."
-    const profileA = situation.match(/([가-힣\w\s]+)\s*\(A\)\s*:\s*([^\n]+)/i);
-    const profileB = situation.match(/([가-힣\w\s]+)\s*\(B\)\s*:\s*([^\n]+)/i);
-
-    if (profileA && profileB) {
-        console.log(`[Manual] Parsed detailed profiles: A='${profileA[1]}', B='${profileB[1]}'`);
-        return {
-            charA: { name: profileA[1].trim(), description: profileA[2].trim() },
-            charB: { name: profileB[1].trim(), description: profileB[2].trim() }
-        };
-    }
-
-    // 2. Fallback to simple conjunction parser
-    const separators = /와\s*|과\s*|이랑\s*|랑\s*|및\s*|그리고\s*|、|,/;
-    const cleaned = situation
-        .replace(/이?가\s*(대화|등장|나오|이야기|토론|논쟁|싸움|조우|상담|설명).*$/u, '')
-        .replace(/하는\s*(상황|장면|설정).*$/u, '')
-        .replace(/의\s*(대화|이야기).*$/u, '')
-        .replace(/^[^\s]+에서\s+/, '')
-        .trim();
-
-    const parts = cleaned.split(separators).map(p => p.trim()).filter(p => p.length > 0 && p.length <= 15);
-    
-    if (parts.length >= 2) {
-        const nameA = parts[partNumA || 0]; // Note: partNumA isn't defined here in original, 
-        const nameB = parts[partNumB || 1]; // using 0 and 1 as defaults
-        if (nameA && nameB && nameA !== nameB) {
-            console.log(`[Manual] Parsed simple characters: A='${nameA}', B='${nameB}'`);
-            return {
-                charA: { name: nameA, description: `${nameA} character in the following situation: ${situation}` },
-                charB: { name: nameB, description: `${nameB} character in the following situation: ${situation}` }
-            };
-        }
-    }
-
-    return null;
-}
-
-/**
- * Build a sensible background_description from the situation text
- */
-function buildBackgroundDescription(situation) {
-    if (!situation) return 'A simple clean background suitable for educational content';
-    return `Scene from the following situation: ${situation}. Realistic and appropriate setting for this interaction.`;
-}
-
-/**
- * Manual Script Mode: Generate empty script data structure
- * Creates the same data shape as AI-generated scripts but with blank dialogue
- */
-function generateManualScript() {
-    const isTeacherStudent = selectedStyle === 'teacher-student';
-    const situation = manualSituationInput ? manualSituationInput.value.trim() : '';
-
-    // --- Try to extract character names from situation description ---
-    const parsed = parseCharactersFromSituation(situation);
-
-    let charA_Data, charB_Data;
-    if (parsed) {
-        charA_Data = parsed.charA;
-        charB_Data = parsed.charB;
-        // Ensure some basic style description if the parsed one is short
-        if (charA_Data.description.length < 15) charA_Data.description = `${charA_Data.name} character in: ${situation}`;
-        if (charB_Data.description.length < 15) charB_Data.description = `${charB_Data.name} character in: ${situation}`;
-    } else if (isTeacherStudent) {
-        charA_Data = { name: '전문가 (A)', description: 'A energetic and smart young professional in their late 20s or early 30s with a trendy business-casual look' };
-        charB_Data = { name: '학습자 (B)', description: 'A curious university student or young office worker in their 20s with a casual, energetic appearance' };
-    } else {
-        charA_Data = { name: '전문가 A', description: 'Expert A: smart professional in their 30s with energetic and modern style' };
-        charB_Data = { name: 'Expert B', description: 'Expert B: intelligent and enthusiastic professional in their 30s' };
-    }
-
-    const bgDescription = buildBackgroundDescription(situation);
-
-    const charA = {
-        id: 'char_a',
-        name: charA_Data.name,
-        description: charA_Data.description,
-        voice_category: 'female',
-        age_group: 'young-adult',
-        color: '#7c5cff'
-    };
-    const charB = {
-        id: 'char_b',
-        name: charB_Data.name,
-        description: charB_Data.description,
-        voice_category: 'male',
-        age_group: 'young-adult',
-        color: '#5c9cff'
-    };
-
-    const scenes = [];
-    for (let i = 0; i < selectedSceneCount; i++) {
-        const isCharA = i % 2 === 0;
-        scenes.push({
-            scene_id: i + 1,
-            character_id: isCharA ? 'char_a' : 'char_b',
-            character: isCharA ? charA.name : charB.name,
-            background: situation ? `${charA_Data.name}와 ${charB_Data.name}의 상황` : '배경',
-            background_description: bgDescription,
-            motion: '기본 동작',
-            script: '',
-            duration: 5,
-            overlays: []
-        });
-    }
-
-    currentScriptData = {
-        video_title: { highlight: '', rest: '' },
-        youtube_title: '',
-        youtube_description: '',
-        youtube_tags: [],
-        core_knowledge: '',
-        situation_setting: { time_period: '', situation: situation, concept: '' },
-        characters: [charA, charB],
-        scenes: scenes,
-        _manual_situation: situation
-    };
-
-    // Show script preview
-    inputSection.classList.add('hidden');
-    showScriptPreview(currentScriptData);
-    scriptSection.classList.remove('hidden');
-    console.log(`[Manual] Created empty script with ${selectedSceneCount} scenes, charA='${charA.name}', charB='${charB.name}', situation: '${situation}'`);
-}
-
-/**
- * Swap the first-speaker / second-speaker assignment in all scenes
- * (toggle which character speaks at even positions vs odd positions)
- */
-function swapSpeakerOrder() {
-    if (!currentScriptData || !currentScriptData.scenes) return;
-
-    const chars = currentScriptData.characters;
-    if (!chars || chars.length < 2) return;
-
-    const [charA, charB] = chars;
-
-    currentScriptData.scenes = currentScriptData.scenes.map((scene) => {
-        const isA = scene.character_id === charA.id;
-        return {
-            ...scene,
-            character_id: isA ? charB.id : charA.id,
-            character: isA ? charB.name : charA.name,
-        };
-    });
-
-    // Re-render the scene list
-    showScriptPreview(currentScriptData);
-    console.log('[Manual] Speaker order swapped');
-}
-
-/**
- * Step 2: Confirm Script and Generate Visuals/Video
- */
-async function startVideoGeneration() {
-    if (!currentScriptData) return;
-
-    confirmGenerateBtn.disabled = true;
-    confirmGenerateBtn.classList.add('loading');
-
-    // Show progress section - DON'T hide script section
     progressSection.classList.remove('hidden');
-    confirmActions.classList.add('hidden'); // Hide confirm buttons during generation
-    resetSteps();
-    progressMessage.textContent = '🚀 영상 제작 시작...';
+
+    generateBtn.disabled = true;
+    generateBtn.textContent = '기획 중...';
 
     try {
-        // Auto-generate metadata if description is empty (manual script mode)
-        if (!currentScriptData.youtube_description) {
-            const scriptText = currentScriptData.scenes
-                .map(scene => `[${scene.character}] ${scene.script}`)
-                .filter(line => line.trim().length > 3)
-                .join('\n');
-            
-            if (scriptText.length > 10) {
-                console.log('[Metadata] Generating metadata from manual script...');
-                progressMessage.textContent = '📝 설명 및 태그 생성 중...';
-                progressFill.style.width = '5%';
-                progressPercent.textContent = '5%';
-
-                try {
-                    const metaResponse = await fetchWithAuth(`${API_BASE}/api/generate-metadata`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            script_text: scriptText,
-                            situation: currentScriptData._manual_situation || ''
-                        }),
-                    });
-
-                    if (metaResponse.ok) {
-                        const metaData = await metaResponse.json();
-                        if (metaData.metadata) {
-                            currentScriptData.youtube_title = metaData.metadata.youtube_title || '';
-                            currentScriptData.youtube_description = metaData.metadata.youtube_description || '';
-                            currentScriptData.youtube_tags = metaData.metadata.youtube_tags || [];
-                            if (metaData.metadata.video_title && (!currentScriptData.video_title.highlight && !currentScriptData.video_title.rest)) {
-                                currentScriptData.video_title = metaData.metadata.video_title;
-                                // Update title inputs if visible
-                                if (hookTitleHighlightInput) hookTitleHighlightInput.value = metaData.metadata.video_title.highlight || '';
-                                if (hookTitleRestInput) hookTitleRestInput.value = metaData.metadata.video_title.rest || '';
-                            }
-                            console.log('[Metadata] Generated:', metaData.metadata.youtube_title);
-                        }
-                    }
-                } catch (metaErr) {
-                    console.warn('[Metadata] Could not generate metadata:', metaErr);
-                    // Continue with video generation even if metadata fails
-                }
-            }
-        }
-
-        console.log('[Video] Starting generation...');
-        progressMessage.textContent = '🚀 영상 제작 시작...';
-        const response = await fetchWithAuth(`${API_BASE}/api/generate-video`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ script_data: currentScriptData }),
-        });
-
-        if (!response.ok) throw new Error(`영상 생성 요청 실패 (${response.status})`);
-
-        const data = await response.json();
-        currentJobId = data.job_id;
-
-        // Start polling
-        pollStatus();
-        pollInterval = setInterval(pollStatus, 2000);
-    } catch (err) {
-        console.error('[Video] Error:', err);
-        showError(`영상 제작 실패: ${err.message}`);
-    } finally {
-        confirmGenerateBtn.disabled = false;
-        confirmGenerateBtn.classList.remove('loading');
-    }
-}
-
-/**
- * Upload the generated video to YouTube
- */
-async function uploadToYoutube(jobId) {
-    const btn = document.getElementById('youtube-upload-btn');
-    const statusDiv = document.getElementById('upload-status');
-
-    if (!jobId) {
-        alert("Job ID가 없습니다. 영상을 먼저 생성해주세요.");
-        return;
-    }
-    const originalContent = btn.innerHTML;
-    btn.innerHTML = '<span class="spinner"></span> 업로드 중...';
-    statusDiv.textContent = '🚀 유튜브 API로 전송 중입니다. 브라우저 창을 닫지 마세요...';
-    statusDiv.classList.remove('hidden');
-    statusDiv.className = 'upload-status info';
-
-    try {
-        const response = await fetchWithAuth('/api/upload-youtube', {
+        const response = await fetchWithAuth(buildAppUrl('api/generate-script'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                job_id: jobId,
-                title: currentScriptData.youtube_title || ((typeof currentScriptData.video_title === 'object' ? `${currentScriptData.video_title.highlight} ${currentScriptData.video_title.rest}` : currentScriptData.video_title) + " #Shorts"),
-                description: currentScriptData.youtube_description || "AI로 자동 생성된 지식 쇼츠입니다. #AI #Knowledge #Shorts",
-                tags: currentScriptData.youtube_tags || ["AI", "Shorts", "Knowledge"]
-            })
+                topic,
+                tags: tagsInput.value.split(','),
+                direction: directionInput.value,
+                style: 'star-instructor',
+                scene_count: selectedSceneCount
+            }),
         });
 
-        const result = await response.json();
+        const data = await parseJson(response);
+        if (data.error) throw new Error(data.error);
 
-        if (result.status === 'success') {
-            statusDiv.innerHTML = `✅ 업로드 성공! <a href="https://youtu.be/${result.video_id}" target="_blank" class="yt-link">유튜브에서 보기</a>`;
-            statusDiv.className = 'upload-status success';
-            btn.innerHTML = '✅ 업로드 완료';
-        } else {
-            throw new Error(result.error || '업로드 중 오류가 발생했습니다.');
-        }
+        currentScriptData = data.script_data;
+        showStep('workspace-step');
+        showScriptPreview(currentScriptData);
     } catch (err) {
-        console.error('YouTube Upload Error:', err);
-        statusDiv.textContent = '❌ 업로드 실패: ' + err.message;
-        statusDiv.className = 'upload-status error';
-        btn.disabled = false;
-        btn.innerHTML = '📹 다시 시도';
+        alert('스크립트 생성 실패: ' + err.message);
+    } finally {
+        generateBtn.disabled = false;
+        generateBtn.textContent = '다음 단계로 ➜';
     }
 }
 
-async function pollStatus() {
-    if (!currentJobId) return;
-
-    try {
-        const response = await fetchWithAuth(`${API_BASE}/api/status/${currentJobId}`);
-        if (!response.ok) return;
-
-        const data = await response.json();
-        updateProgress(data);
-
-        if (data.status === 'completed') {
-            clearInterval(pollInterval);
-            pollInterval = null;
-            showResult(data);
-        } else if (data.status === 'error') {
-            clearInterval(pollInterval);
-            pollInterval = null;
-            showError(data.message);
-        }
-    } catch (err) {
-        console.error('[Poll] Error:', err);
+async function regenerateScript() {
+    if (!topicInput.value.trim()) {
+        showStep('input-step');
+        topicInput.focus();
+        return;
     }
+
+    if (currentScriptData && !confirm('현재 편집 중인 대본을 새로 생성된 대본으로 교체할까요?')) return;
+    await startScriptGeneration();
 }
 
-function updateProgress(data) {
-    const { progress, message, status } = data;
-    progressFill.style.width = `${progress}%`;
-    progressPercent.textContent = `${progress}%`;
-    progressMessage.textContent = message;
-
-    updateStep('script', status, ['generating_script']);
-    updateStep('images', status, ['generating_images']);
-    updateStep('narration', status, ['generating_narration']);
-    updateStep('video', status, ['composing_video', 'completed']);
-}
-
-function updateStep(stepName, currentStatus, activeStatuses) {
-    const stepEl = document.querySelector(`.step[data-step="${stepName}"]`);
-    if (!stepEl) return;
-
-    const statusOrder = ['pending', 'generating_script', 'generating_images', 'generating_narration', 'composing_video', 'completed'];
-    const currentIndex = statusOrder.indexOf(currentStatus);
-    const stepStatuses = activeStatuses.map(s => statusOrder.indexOf(s));
-
-    if (currentIndex > Math.max(...stepStatuses)) {
-        stepEl.classList.remove('active');
-        stepEl.classList.add('completed');
-    } else if (activeStatuses.includes(currentStatus)) {
-        stepEl.classList.add('active');
-        stepEl.classList.remove('completed');
-    }
-}
-
+/**
+ * Editor Rendering
+ */
 function showScriptPreview(scriptData) {
-    scriptSection.classList.remove('hidden');
-    confirmActions.classList.remove('hidden');
-
-    // Setup Hook Title Editor
-    if (scriptData.video_title && hookTitleHighlightInput && hookTitleRestInput && titleEditContainer) {
-        if (typeof scriptData.video_title === 'object') {
-            hookTitleHighlightInput.value = scriptData.video_title.highlight || '';
-            hookTitleRestInput.value = scriptData.video_title.rest || '';
-        } else {
-            const parts = scriptData.video_title.split(' ');
-            hookTitleHighlightInput.value = parts[0] || '';
-            hookTitleRestInput.value = parts.slice(1).join(' ');
-            // Convert to object so edits work correctly
-            scriptData.video_title = { highlight: parts[0] || '', rest: parts.slice(1).join(' ') };
-        }
-        titleEditContainer.classList.remove('hidden');
-
-        // ADDED: Sync edits back to scriptData
-        hookTitleHighlightInput.oninput = (e) => handleTitleEdit(e, 'highlight');
-        hookTitleRestInput.oninput = (e) => handleTitleEdit(e, 'rest');
+    if (!scriptData) return;
+    resetGenerateButton();
+    
+    // Populate Title Card
+    if (typeof scriptData.video_title === 'object') {
+        hookTitleHighlightInput.value = scriptData.video_title.highlight || '';
+        hookTitleRestInput.value = scriptData.video_title.rest || '';
+    }
+    subjectInput.value = scriptData.subject || '';
+    youtubeTitleInput.value = scriptData.youtube_title || '';
+    youtubeDescriptionInput.value = scriptData.youtube_description || '';
+    youtubeTagsInput.value = (scriptData.youtube_tags || []).join(', ');
+    if (scriptData.full_audio_path) {
+        fullAudioStatus.querySelector('.status-filename').textContent = scriptData.full_audio_path.split('/').pop();
+        fullAudioStatus.classList.remove('hidden');
+    } else {
+        fullAudioStatus.classList.add('hidden');
     }
 
-    // Setup Subject Input
-    const subjectInput = document.getElementById('subject-input');
-    if (subjectInput) {
-        subjectInput.value = scriptData.subject || '지식';
-        // ADDED: Sync edits back to scriptData
-        subjectInput.oninput = (e) => handleSubjectEdit(e);
-    }
-
-    // Show/hide speaker swap button (only for manual mode)
-    const swapBtn = document.getElementById('btn-swap-speakers');
-    if (swapBtn) {
-        if (inputMode === 'manual') {
-            swapBtn.classList.remove('hidden');
-        } else {
-            swapBtn.classList.add('hidden');
-        }
-    }
-
+    // Render Scenes
     scenesContainer.innerHTML = scriptData.scenes.map((scene, idx) => {
         const imageOverlay = (scene.overlays || []).find(ov => ov.type === 'image');
         const assetPath = imageOverlay ? imageOverlay.content : null;
 
         return `
-        <div class="scene-item" 
-            data-scene-idx="${idx}" 
-            ondragover="handleDragOver(event)" 
-            ondragleave="handleDragLeave(event)" 
-            ondrop="handleDrop(event, ${idx})">
+        <div class="scene-item">
             <div class="scene-number">${scene.scene_id}</div>
-            <div class="scene-details">
-                <div class="scene-meta">
-                    <span class="scene-tag">👤 ${scene.character}</span>
-                    <span class="scene-tag">🏠 ${scene.background}</span>
-                    <span class="scene-tag">🎭 ${scene.motion}</span>
-                </div>
-                <textarea class="scene-script-edit" 
-                    oninput="handleScriptEdit(event, ${idx})"
-                    onpaste="handlePaste(event, ${idx})"
-                    placeholder="이 장면의 대사...">${scene.script || ''}</textarea>
+            
+            <div class="editor-label">🎙️ 강사 내레이션</div>
+            <textarea class="scene-script-edit" oninput="handleScriptEdit(event, ${idx})">${scene.script || ''}</textarea>
+            <div class="scene-script-meta">
+                <span id="scene-char-count-${idx}" class="scene-char-count"></span>
+            </div>
 
-                <!-- Scene Asset Controls -->
-                <div class="scene-upload-group">
-                    <label class="upload-label">
-                        <span class="upload-icon">📁</span>
-                        <span class="upload-text">오버레이 사진 업로드 (또는 대사창에 붙여넣기)</span>
-                        <input type="file" accept="image/*,.gif" onchange="handleFileUpload(event, ${idx})">
+            <div class="editor-label">🖍️ 칠판 연출 AI 힌트 (글자 없는 이미지)</div>
+            <textarea class="scene-bg-edit" oninput="handleBgEdit(event, ${idx})">${scene.background_description || ''}</textarea>
+
+            <div class="scene-overlay-section">
+                <div class="editor-label">🖼️ 오버레이 (칠판 영역)</div>
+                <div class="overlay-visualizer">
+                    <div class="blackboard-zone">
+                        <div id="preview-${idx}">
+                            ${assetPath ? `<img src="${buildAppUrl(`output/${assetPath}`)}" class="overlay-preview-img">` : '<span style="opacity:0.3; font-size:10px;">칠판 영역</span>'}
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <label class="btn-yt-action btn-sm">
+                        📁 업로드 <input type="file" style="display:none" onchange="handleFileUpload(event, ${idx})">
                     </label>
-                    <div class="uploaded-preview" id="preview-${idx}" ${assetPath ? 'style="display:block"' : ''}>
-                        ${assetPath ? `<img src="${API_BASE}/output/${assetPath}"><button class="remove-upload" onclick="removeAsset(${idx})">×</button>` : ''}
-                    </div>
+                    <button class="btn-yt-action btn-sm" onclick="handleAiImageGenerate(${idx})">🎨 AI 생성</button>
+                    ${assetPath ? `<button class="btn-yt-action btn-sm border" onclick="removeAsset(${idx})">🗑️ 제거</button>` : ''}
                 </div>
-
-                <!-- AI Image Generation -->
-                <div class="scene-ai-image-group">
-                    <div class="ai-image-header">
-                        <span class="ai-image-icon">🎨</span>
-                        <span>AI 오버레이 이미지 생성</span>
-                    </div>
-                    <div class="ai-image-input-row">
-                        <input type="text" class="ai-image-prompt" id="prompt-${idx}" 
-                            placeholder="그림 설명을 입력하세요"
-                            value="">
-                        <button class="btn-ai-generate" onclick="handleAiImageGenerate(${idx})">생성</button>
-                    </div>
-                    <div id="ai-preview-container-${idx}" class="ai-image-preview hidden">
-                        <!-- AI Generated Preview -->
-                    </div>
-                </div>
-
-                <div class="scene-footer">
-                    <span class="scene-duration">⏱ ${scene.duration || scene.durationInSeconds || 5}초</span>
-                </div>
+                <div id="ai-preview-container-${idx}" class="hidden" style="margin-top:10px;"></div>
             </div>
         </div>
-    `;
+        `;
     }).join('');
 
-    updateFullScriptSidebar();
+    updateScriptStats();
 }
 
-/**
- * Handle scene-specific asset upload (called by file input)
- */
-async function handleFileUpload(event, sceneIdx) {
-    const file = event.target.files[0];
-    if (!file) return;
-    await uploadFileObject(file, sceneIdx);
+function countSpeechChars(text = '') {
+    return String(text).replace(/\s+/g, '').length;
 }
 
-/**
- * Handle clipboard paste events (pasting images)
- */
-async function handlePaste(event, sceneIdx) {
-    const clipboardData = event.clipboardData || (window.event && window.event.clipboardData);
-    if (!clipboardData) return;
-    
-    const items = clipboardData.items;
-    let imageFile = null;
-
-    for (const item of items) {
-        if (item.type.indexOf('image') !== -1) {
-            imageFile = item.getAsFile();
-            break;
-        }
-    }
-
-    if (imageFile) {
-        // We found an image! Upload it.
-        console.log(`[Paste] Image detected for scene ${sceneIdx}`);
-        await uploadFileObject(imageFile, sceneIdx);
-    }
-}
-
-/**
- * Handle Drag & Drop events
- */
-function handleDragOver(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.classList.add('drag-over');
-}
-
-function handleDragLeave(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.classList.remove('drag-over');
-}
-
-async function handleDrop(event, sceneIdx) {
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.classList.remove('drag-over');
-
-    const file = event.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) {
-        console.log(`[Drop] Image detected for scene ${sceneIdx}`);
-        await uploadFileObject(file, sceneIdx);
-    }
-}
-
-/**
- * Core upload logic used by both file input and clipboard paste
- */
-async function uploadFileObject(file, sceneIdx) {
-    if (!file) return;
-
-    // Show immediate loading indicator in preview area
-    const previewDiv = document.getElementById(`preview-${sceneIdx}`);
-    previewDiv.style.display = 'block';
-    previewDiv.innerHTML = `<div class="upload-loading">⏳ 업로드 중...</div>`;
-
-    try {
-        const formData = new FormData();
-        formData.append('file', file);
-
-        const response = await fetchWithAuth(`${API_BASE}/api/upload-asset`, {
-            method: 'POST',
-            body: formData,
-        });
-
-        if (!response.ok) throw new Error('업로드 실패');
-        const data = await response.json();
-
-        // Update overlays array in currentScriptData
-        if (!currentScriptData.scenes[sceneIdx].overlays) {
-            currentScriptData.scenes[sceneIdx].overlays = [];
-        }
-        currentScriptData.scenes[sceneIdx].overlays = currentScriptData.scenes[sceneIdx].overlays.filter(ov => ov.type !== 'image');
-        currentScriptData.scenes[sceneIdx].overlays.push({
-            type: 'image',
-            content: data.path,
-            position: 'center',
-            startTime: 0,
-            duration: currentScriptData.scenes[sceneIdx].duration || 5
-        });
-
-        // Update Preview UI
-        previewDiv.innerHTML = `
-            <img src="${API_BASE}/output/${data.path}">
-            <button class="remove-upload" onclick="removeAsset(${sceneIdx})">×</button>
-        `;
-        console.log(`[Upload] Success: ${data.path} for scene ${sceneIdx}`);
-    } catch (err) {
-        previewDiv.style.display = 'none';
-        previewDiv.innerHTML = '';
-        alert('업로드 오류: ' + err.message);
-    }
-}
-
-/**
- * Handle AI image generation for a specific scene
- */
-async function handleAiImageGenerate(sceneIdx) {
-    const promptInput = document.getElementById(`prompt-${sceneIdx}`);
-    const prompt = promptInput.value.trim();
-    if (!prompt && !currentScriptData.scenes[sceneIdx].script) {
-        alert('이미지 설명이나 스크립트 대사가 필요합니다.');
+function updateScriptStats() {
+    if (!currentScriptData) {
+        if (scriptStats) scriptStats.textContent = '';
         return;
     }
 
-    const btn = event.target;
-    const originalText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '...';
+    const target = currentScriptData.duration_target || {};
+    const scenes = currentScriptData.scenes || [];
+    const totalChars = scenes.reduce((sum, scene) => sum + countSpeechChars(scene.script || ''), 0);
+    currentScriptData.speech_char_count = totalChars;
 
-    const previewContainer = document.getElementById(`ai-preview-container-${sceneIdx}`);
-    previewContainer.classList.remove('hidden');
-    previewContainer.innerHTML = '<div class="ai-image-loading">🎨 생성 중...</div>';
+    if (scriptStats) {
+        const minTotal = target.min_total_chars || 0;
+        const maxTotal = target.max_total_chars || 0;
+        const minScene = target.min_scene_chars || 0;
+        const maxScene = target.max_scene_chars || 0;
+        const totalStatus = totalChars > maxTotal ? '조금 김' : totalChars < minTotal ? '조금 짧음' : '적정';
+        scriptStats.innerHTML = `
+            총 대본 글자수 <strong>${totalChars}자</strong> / 권장 ${minTotal}~${maxTotal}자 (${totalStatus})<br>
+            장면당 권장 글자수 ${minScene}~${maxScene}자
+        `;
+    }
+
+    scenes.forEach((scene, idx) => {
+        const el = document.getElementById(`scene-char-count-${idx}`);
+        if (!el) return;
+        const chars = countSpeechChars(scene.script || '');
+        const maxScene = target.max_scene_chars || 0;
+        const minScene = target.min_scene_chars || 0;
+        el.textContent = `현재 ${chars}자 / 권장 ${minScene}~${maxScene}자`;
+        el.classList.toggle('over', !!maxScene && chars > maxScene);
+    });
+}
+
+/**
+ * Final Video Generation
+ */
+async function startVideoGeneration() {
+    if (!currentScriptData) return;
+
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = null;
+    currentJobId = null;
+
+    confirmGenerateBtn.disabled = true;
+    confirmGenerateBtn.textContent = '영상 제작 요청 중...';
+    
+    resultSection.classList.add('hidden');
+    errorSection.classList.add('hidden');
+    progressSection.classList.remove('hidden');
+    resetSteps();
 
     try {
-        const response = await fetchWithAuth(`${API_BASE}/api/generate-image`, {
+        const response = await fetchWithAuth(buildAppUrl('api/generate-video'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                prompt: prompt || 'Detail related to the dialogue',
-                scene_script: currentScriptData.scenes[sceneIdx].script + " (Situation: " + (currentScriptData._manual_situation || "") + ")"
-            }),
+            body: JSON.stringify({ script_data: currentScriptData }),
         });
-
-        if (!response.ok) throw new Error('이미지 생성 실패');
-        const data = await response.json();
-
-        previewContainer.innerHTML = `
-            <img src="${API_BASE}/output/${data.path}">
-            <div class="ai-preview-actions">
-                <button class="btn-ai-use" onclick="useAiImage(${sceneIdx}, '${data.path}')">사용하기</button>
-                <button class="btn-ai-regenerate" onclick="handleAiImageGenerate(${sceneIdx})">다시생성</button>
-                <button class="btn-ai-cancel" onclick="hideAiPreview(${sceneIdx})">취소</button>
-            </div>
-        `;
+        const data = await parseJson(response);
+        if (data.error || !data.job_id) {
+            throw new Error(data.error || '영상 작업을 시작하지 못했습니다.');
+        }
+        currentJobId = data.job_id;
+        
+        pollStatus();
+        pollInterval = setInterval(pollStatus, 2000);
     } catch (err) {
-        previewContainer.innerHTML = `<div class="error-text">❌ 오류: ${err.message}</div>`;
-        setTimeout(() => previewContainer.classList.add('hidden'), 3000);
-    } finally {
-        btn.disabled = false;
-        btn.textContent = originalText;
-    }
-}
-
-function useAiImage(sceneIdx, imagePath) {
-    if (!currentScriptData.scenes[sceneIdx].overlays) {
-        currentScriptData.scenes[sceneIdx].overlays = [];
-    }
-    currentScriptData.scenes[sceneIdx].overlays = currentScriptData.scenes[sceneIdx].overlays.filter(ov => ov.type !== 'image');
-    currentScriptData.scenes[sceneIdx].overlays.push({
-        type: 'image',
-        content: imagePath,
-        position: 'center',
-        startTime: 0,
-        duration: currentScriptData.scenes[sceneIdx].duration || 5
-    });
-
-    const previewDiv = document.getElementById(`preview-${sceneIdx}`);
-    previewDiv.style.display = 'block';
-    previewDiv.innerHTML = `
-        <img src="${API_BASE}/output/${imagePath}">
-        <button class="remove-upload" onclick="removeAsset(${sceneIdx})">×</button>
-    `;
-    hideAiPreview(sceneIdx);
-}
-
-function hideAiPreview(sceneIdx) {
-    document.getElementById(`ai-preview-container-${sceneIdx}`).classList.add('hidden');
-}
-
-function removeAsset(sceneIdx) {
-    if (currentScriptData && currentScriptData.scenes[sceneIdx] && currentScriptData.scenes[sceneIdx].overlays) {
-        currentScriptData.scenes[sceneIdx].overlays = currentScriptData.scenes[sceneIdx].overlays.filter(ov => ov.type !== 'image');
-    }
-    const previewDiv = document.getElementById(`preview-${sceneIdx}`);
-    previewDiv.style.display = 'none';
-    previewDiv.innerHTML = '';
-}
-
-/**
- * Copy text from input/textarea to clipboard
- * Improved for mobile/iOS compatibility
- */
-function copyToClipboard(elementId) {
-    const el = document.getElementById(elementId);
-    if (!el) return;
-    
-    const text = el.value || el.textContent;
-    const btn = el.nextElementSibling;
-
-    // Use modern Clipboard API if available
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(() => {
-            showCopyFeedback(btn);
-        }).catch(err => {
-            console.error('[Copy] Clipboard API failed:', err);
-            fallbackCopy(el, btn);
-        });
-    } else {
-        fallbackCopy(el, btn);
+        showError(err.message);
     }
 }
 
 /**
- * Fallback copy method for older environmental or restricted contexts
+ * Polling & Progress
  */
-function fallbackCopy(el, btn) {
+async function pollStatus() {
+    if (!currentJobId) return;
     try {
-        // For iOS/Mobile: need to handle readonly and selection carefully
-        const isReadOnly = el.hasAttribute('readonly');
-        if (isReadOnly) el.removeAttribute('readonly');
-        
-        el.select();
-        el.setSelectionRange(0, 99999);
-        
-        const successful = document.execCommand('copy');
-        
-        if (isReadOnly) el.setAttribute('readonly', true);
-        
-        if (successful) {
-            showCopyFeedback(btn);
-        } else {
-            throw new Error('execCommand returned false');
+        const response = await fetchWithAuth(buildAppUrl(`api/status/${encodeURIComponent(currentJobId)}`));
+        if (!response.ok) return;
+        const data = await parseJson(response);
+        updateProgress(data);
+        if (data.status === 'completed') {
+            clearInterval(pollInterval);
+            pollInterval = null;
+            showResult(data);
+            loadHistory();
+        } else if (data.status === 'error') {
+            clearInterval(pollInterval);
+            pollInterval = null;
+            showError(data.message);
         }
-    } catch (err) {
-        console.error('[Copy] Fallback failed:', err);
-        alert('복사에 실패했습니다. 내용을 직접 선택해서 복사해주세요.');
+    } catch (e) {
+        console.error('Polling error:', e);
     }
+}
+
+function updateProgress(data) {
+    const { progress, message, status, logs } = data;
+    if (progressFill) progressFill.style.width = `${progress}%`;
+    if (progressPercent) progressPercent.textContent = `${progress}%`;
+    if (progressMessage) progressMessage.textContent = message;
+
+    if (logs && realtimeLog) {
+        realtimeLog.innerHTML = logs.map(l => `<div class="log-line">${l}</div>`).join('');
+        realtimeLog.scrollTop = realtimeLog.scrollHeight;
+    }
+    
+    if (logStatusDot) {
+        logStatusDot.className = (status === 'pending' || status.includes('generating') || status === 'composing_video') ? 'dot active' : 'dot';
+    }
+    
+    // Update pipe items
+    document.querySelectorAll('.pipe-item').forEach(item => {
+        const step = item.dataset.step;
+        const isActive = (step === 'script' && status.includes('script')) ||
+                         (step === 'images' && status.includes('images')) ||
+                         (step === 'narration' && status.includes('narration')) ||
+                         (step === 'video' && (status === 'composing_video' || status === 'completed'));
+        item.classList.toggle('active', isActive);
+    });
+}
+
+function showResult(data) {
+    resetGenerateButton();
+    progressSection.classList.add('hidden');
+    resultSection.classList.remove('hidden');
+    resultVideo.src = buildAppUrl(String(data.video_url || '').replace(/^\/+/, ''));
+    resultVideo.load();
+    downloadBtn.href = buildAppUrl(`api/download/${encodeURIComponent(`shorts_${data.job_id}.mp4`)}`);
+    youtubeUploadBtn.onclick = () => uploadToYoutube(data.job_id);
+    if (currentScriptData) {
+        resultYoutubeTitle.textContent = currentScriptData.youtube_title || '';
+        resultYoutubeDescription.textContent = currentScriptData.youtube_description || '';
+        resultYoutubeTags.textContent = (currentScriptData.youtube_tags || [])
+            .map((tag) => `#${String(tag).replace(/^#+/, '')}`)
+            .join(' ');
+    }
+}
+
+function showError(msg) {
+    resetGenerateButton();
+    progressSection.classList.add('hidden');
+    errorSection.classList.remove('hidden');
+    errorMessage.textContent = msg;
+}
+
+function resetSteps() {
+    if (progressFill) progressFill.style.width = '0%';
+    if (progressPercent) progressPercent.textContent = '0%';
+    if (progressMessage) progressMessage.textContent = '준비 중...';
+    if (realtimeLog) realtimeLog.innerHTML = '';
+    if (logStatusDot) logStatusDot.className = 'dot';
 }
 
 /**
- * Show visual feedback after successful copy
+ * Event Handlers (Global Scope for inline HTML calls)
  */
-function showCopyFeedback(btn) {
-    if (!btn) return;
-    const originalText = btn.textContent;
-    btn.textContent = '✅ 복사됨';
-    btn.classList.add('copied');
-    setTimeout(() => {
-        btn.textContent = originalText;
-        btn.classList.remove('copied');
-    }, 2000);
-}
-
-function handleTitleEdit(event, part) {
-    if (currentScriptData) {
-        if (typeof currentScriptData.video_title !== 'object') {
-            currentScriptData.video_title = { highlight: '', rest: currentScriptData.video_title };
-        }
-        if (part === 'highlight') {
-            currentScriptData.video_title.highlight = event.target.value;
-        } else if (part === 'rest') {
-            currentScriptData.video_title.rest = event.target.value;
-        }
-        updateFullScriptSidebar();
+async function fetchWithAuth(url, options = {}) {
+    const token = localStorage.getItem('auth_token');
+    if (!options.headers) options.headers = {};
+    if (token) options.headers['Authorization'] = `Bearer ${token}`;
+    let res;
+    try {
+        res = await fetch(url, options);
+    } catch (networkErr) {
+        throw new Error('서버 연결 실패. 백엔드 서버가 실행 중인지 확인해주세요.');
     }
-}
-
-function handleSubjectEdit(event) {
-    if (currentScriptData) {
-        currentScriptData.subject = event.target.value;
-        updateFullScriptSidebar();
+    if (res.status === 401) {
+        localStorage.removeItem('auth_token');
+        loginOverlay.classList.remove('hidden');
+        appContainer.classList.add('hidden');
+        throw new Error('인증이 만료되었습니다. 다시 로그인해주세요.');
     }
+    return res;
 }
 
-function handleScriptEdit(event, idx) {
-    if (currentScriptData && currentScriptData.scenes[idx]) {
-        const text = event.target.value;
-        currentScriptData.scenes[idx].script = text;
-        
-        // Update background context for manual mode if the script changed
-        if (inputMode === 'manual' || !currentScriptData.scenes[idx].background_description) {
-            const situation = currentScriptData._manual_situation || "";
-            const charName = currentScriptData.scenes[idx].character;
-            currentScriptData.scenes[idx].background_description = 
-                `Scene with ${charName} in the following situation: ${situation}. ` +
-                (text.trim() ? `Specific interaction: ${text.substring(0, 100)}. ` : "") +
-                `Realistic and appropriate educational animation setting.`;
-        }
-
-        updateFullScriptSidebar();
+/** JSON 파싱 실패 시 HTML(502/서버오류) 여부를 감지해 명확한 메시지로 변환 */
+async function parseJson(res) {
+    const ct = res.headers.get('content-type') || '';
+    if (!ct.includes('json')) {
+        throw new Error(`서버 오류 (HTTP ${res.status}). 서버가 재시작 중이거나 일시적 오류가 발생했습니다. 잠시 후 다시 시도해주세요.`);
     }
+    return res.json();
 }
+
+window.handleScriptEdit = (e, idx) => {
+    if (!currentScriptData) return;
+    currentScriptData.scenes[idx].script = e.target.value;
+    updateScriptStats();
+};
+window.handleBgEdit = (e, idx) => { if(currentScriptData) currentScriptData.scenes[idx].background_description = e.target.value; };
+window.handleTitleEdit = () => {
+    if (!currentScriptData) return;
+    if (typeof currentScriptData.video_title !== 'object' || currentScriptData.video_title === null) {
+        currentScriptData.video_title = { highlight: '', rest: '' };
+    }
+    currentScriptData.video_title.highlight = hookTitleHighlightInput.value;
+    currentScriptData.video_title.rest = hookTitleRestInput.value;
+    currentScriptData.subject = subjectInput.value;
+};
+window.handleMetadataEdit = () => {
+    if (!currentScriptData) return;
+    currentScriptData.youtube_title = youtubeTitleInput.value.trim();
+    currentScriptData.youtube_description = youtubeDescriptionInput.value.trim();
+    currentScriptData.youtube_tags = youtubeTagsInput.value
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+};
+window.copyFullScript = () => {
+    if (!currentScriptData) return;
+    const text = currentScriptData.scenes.map(s => `[내레이션] ${s.script}`).join('\n\n');
+    navigator.clipboard.writeText(text).then(() => alert('복사되었습니다.'));
+};
 
 async function handleFullAudioUpload(event) {
     const file = event.target.files[0];
-    if (!file) return;
+    if (!file || !currentScriptData) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
 
     try {
-        const formData = new FormData();
-        formData.append('file', file);
+        const res = await fetchWithAuth(buildAppUrl('api/upload-asset'), { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
 
-        const response = await fetchWithAuth(`${API_BASE}/api/upload-asset`, {
-            method: 'POST',
-            body: formData,
-        });
-
-        if (!response.ok) throw new Error('오디오 업로드 실패');
-        const data = await response.json();
-
-        if (currentScriptData) {
-            currentScriptData.full_audio_path = data.path;
-        }
-
-        const statusDiv = document.getElementById('full-audio-status');
-        if (statusDiv) {
-            statusDiv.classList.remove('hidden');
-            statusDiv.querySelector('.status-filename').textContent = file.name;
-        }
-    } catch (err) {
-        alert('오디오 업로드 오류: ' + err.message);
+        currentScriptData.full_audio_path = data.path;
+        fullAudioStatus.querySelector('.status-filename').textContent = file.name;
+        fullAudioStatus.classList.remove('hidden');
+    } catch (e) {
+        alert('음성 파일 업로드 실패: ' + e.message);
     }
 }
 
 function removeFullAudio() {
-    if (currentScriptData) {
-        delete currentScriptData.full_audio_path;
-    }
-    const statusDiv = document.getElementById('full-audio-status');
-    if (statusDiv) {
-        statusDiv.classList.add('hidden');
-    }
-    const fileInput = document.getElementById('full-audio-input');
-    if (fileInput) {
-        fileInput.value = '';
+    if (!currentScriptData) return;
+    delete currentScriptData.full_audio_path;
+    fullAudioStatus.classList.add('hidden');
+}
+
+async function handleFileUpload(event, idx) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+        const res = await fetchWithAuth(buildAppUrl('api/upload-asset'), { method: 'POST', body: formData });
+        const data = await res.json();
+        updateSceneOverlay(idx, data.path);
+    } catch (e) { alert('업로드 실패'); }
+}
+
+function updateSceneOverlay(idx, path) {
+    if(!currentScriptData.scenes[idx].overlays) currentScriptData.scenes[idx].overlays = [];
+    currentScriptData.scenes[idx].overlays = [{ type: 'image', content: path, position: 'blackboard', startTime: 0, duration: 5 }];
+    showScriptPreview(currentScriptData);
+}
+
+window.removeAsset = (idx) => {
+    currentScriptData.scenes[idx].overlays = [];
+    showScriptPreview(currentScriptData);
+};
+
+async function uploadToYoutube(jobId) {
+    const statusDiv = document.getElementById('upload-status');
+    statusDiv.classList.remove('hidden');
+    statusDiv.textContent = '⏳ 업로드 중...';
+    try {
+        const res = await fetchWithAuth(buildAppUrl('api/upload-youtube'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                job_id: jobId,
+                title: currentScriptData.youtube_title || "Shorts",
+                description: currentScriptData.youtube_description || "",
+                tags: currentScriptData.youtube_tags || []
+            })
+        });
+        const data = await parseJson(res);
+        statusDiv.textContent = data.status === 'success' ? '✅ 업로드 완료!' : '❌ 실패: ' + data.error;
+    } catch (e) { statusDiv.textContent = '❌ 오류 발생'; }
+}
+
+async function loadHistory() {
+    try {
+        const res = await fetchWithAuth(buildAppUrl('api/history'));
+        const items = await parseJson(res);
+        historyList.innerHTML = items.length ? items.map(item => `
+            <div class="history-item">
+                <div class="history-thumb"><video src="${buildAppUrl(String(item.video_url || '').replace(/^\/+/, ''))}" preload="metadata"></video></div>
+                <div class="history-info">
+                    <div class="history-title">${item.youtube_title || item.topic || '제목 없음'}</div>
+                    <div class="history-actions">
+                        <button class="btn-yt-action btn-sm" onclick="openHistoryItem('${item.id}')">보기</button>
+                        <button class="btn-yt-action btn-sm" onclick="copyHistoryMeta('${item.id}', 'title')">제목 복사</button>
+                        <button class="btn-yt-action btn-sm" onclick="copyHistoryMeta('${item.id}', 'description')">설명 복사</button>
+                        <button class="btn-yt-action btn-sm" onclick="copyHistoryMeta('${item.id}', 'tags')">태그 복사</button>
+                        <button class="btn-yt-action btn-sm border" onclick="deleteHistoryItem('${item.id}')">삭제</button>
+                        <a href="${buildAppUrl(`api/download/${encodeURIComponent(`shorts_${item.job_id}.mp4`)}`)}" class="btn-yt-action btn-sm">다운로드</a>
+                    </div>
+                </div>
+            </div>
+        `).join('') : '<div style="grid-column:1/-1; text-align:center; padding:100px; color:#aaa;">보관함이 비어있습니다.</div>';
+    } catch (e) { historyList.innerHTML = '보관함을 불러오지 못했습니다.'; }
+}
+
+async function openHistoryItem(id) {
+    try {
+        const res = await fetchWithAuth(buildAppUrl(`api/history/${encodeURIComponent(id)}`));
+        const item = await parseJson(res);
+        currentScriptData = item.script_data;
+        showStep('workspace-step');
+        showScriptPreview(currentScriptData);
+        showResult({ job_id: item.job_id, video_url: item.video_url });
+    } catch (e) { alert('항목을 열 수 없습니다.'); }
+}
+
+async function deleteHistoryItem(id) {
+    if (!confirm('정말 삭제하시겠습니까?')) return;
+    try {
+        await fetchWithAuth(buildAppUrl(`api/history/${encodeURIComponent(id)}/delete`), { method: 'POST' });
+        loadHistory();
+    } catch (e) { alert('삭제 실패'); }
+}
+
+async function copyHistoryMeta(id, field) {
+    try {
+        const res = await fetchWithAuth(buildAppUrl(`api/history/${encodeURIComponent(id)}`));
+        const item = await parseJson(res);
+        const text = field === 'title'
+            ? item.youtube_title
+            : field === 'tags'
+                ? (item.youtube_tags || []).join(', ')
+                : item.youtube_description;
+        if (!text) {
+            alert('복사할 내용이 없습니다.');
+            return;
+        }
+        await navigator.clipboard.writeText(text);
+        alert('복사되었습니다.');
+    } catch (e) {
+        alert('복사 실패');
     }
 }
 
+/**
+ * AI Image Generation for overlays
+ */
+async function handleAiImageGenerate(idx) {
+    const imagePrompt = window.prompt(`오버레이 이미지 설명을 입력하세요.`, currentScriptData.scenes[idx].background_description);
+    if (!imagePrompt) return;
+    
+    const container = document.getElementById(`ai-preview-container-${idx}`);
+    container.classList.remove('hidden');
+    container.innerHTML = '<div style="padding:20px; text-align:center; color:var(--accent-yellow);">🎨 AI 이미지 생성 중...</div>';
 
-// Make globally accessible
-window.handleScriptEdit = handleScriptEdit;
-window.handleTitleEdit = handleTitleEdit;
-window.handleSubjectEdit = handleSubjectEdit;
+    try {
+        const res = await fetchWithAuth(buildAppUrl('api/generate-image'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: imagePrompt, scene_script: currentScriptData.scenes[idx].script })
+        });
+        const data = await parseJson(res);
+        if (data.error) throw new Error(data.error);
+        updateSceneOverlay(idx, data.path);
+        container.classList.add('hidden');
+    } catch (e) { alert('이미지 생성 실패: ' + e.message); container.classList.add('hidden'); }
+}
+
+/**
+ * Event Listeners Initial Bindings
+ */
+loginBtn.addEventListener('click', handleLogin);
+loginPassword.addEventListener('keydown', (e) => { if(e.key === 'Enter') handleLogin(); });
+navCreateBtn.addEventListener('click', () => showStep('input-step'));
+navHistoryBtn.addEventListener('click', () => { showStep('history-section'); loadHistory(); });
+historyRefreshBtn.addEventListener('click', loadHistory);
+logoHome.addEventListener('click', resetUI);
+generateBtn.addEventListener('click', startScriptGeneration);
+backToInputBtn.addEventListener('click', () => showStep('input-step'));
+regenerateScriptBtn.addEventListener('click', regenerateScript);
+confirmGenerateBtn.addEventListener('click', startVideoGeneration);
+newVideoBtn.addEventListener('click', resetUI);
+retryBtn.addEventListener('click', startVideoGeneration);
+copyMetaBtn.addEventListener('click', async () => {
+    if (!currentScriptData) return;
+    const text = [
+        currentScriptData.youtube_title || '',
+        '',
+        currentScriptData.youtube_description || '',
+        '',
+        (currentScriptData.youtube_tags || []).map((tag) => `#${String(tag).replace(/^#+/, '')}`).join(' '),
+    ].join('\n').trim();
+    await navigator.clipboard.writeText(text);
+    alert('메타데이터를 복사했습니다.');
+});
+menuBtn.addEventListener('click', () => alert('메뉴 기능은 준비 중입니다.'));
+
+sceneCountOptions.forEach(opt => {
+    opt.onclick = () => {
+        sceneCountOptions.forEach(o => o.classList.remove('active'));
+        opt.classList.add('active');
+        selectedSceneCount = parseInt(opt.dataset.count);
+        console.log('Selected count:', selectedSceneCount);
+    };
+});
+
+window.onload = checkAuth;
+window.openHistoryItem = openHistoryItem;
+window.deleteHistoryItem = deleteHistoryItem;
+window.copyHistoryMeta = copyHistoryMeta;
+window.handleAiImageGenerate = handleAiImageGenerate;
+window.handleFileUpload = handleFileUpload;
 window.handleFullAudioUpload = handleFullAudioUpload;
 window.removeFullAudio = removeFullAudio;
-window.handleFileUpload = handleFileUpload;
-window.handleAiImageGenerate = handleAiImageGenerate;
-window.useAiImage = useAiImage;
-window.hideAiPreview = hideAiPreview;
-window.removeAsset = removeAsset;
-window.copyFullScript = copyFullScript;
-window.copyToClipboard = copyToClipboard;
-window.swapSpeakerOrder = swapSpeakerOrder;
-
-function showResult(data) {
-    resultSection.classList.remove('hidden');
-    progressSection.classList.add('hidden');
-
-    // Scroll to result
-    resultSection.scrollIntoView({ behavior: 'smooth' });
-
-    const videoUrl = `${API_BASE}${data.video_url}`;
-    resultVideo.src = videoUrl;
-    resultVideo.load();
-
-    // Position YouTube Upload button inside result-actions
-    const resultActions = resultSection.querySelector('.result-actions');
-    let uploadBtn = document.getElementById('youtube-upload-btn');
-
-    if (!uploadBtn) {
-        uploadBtn = document.createElement('button');
-        uploadBtn.id = 'youtube-upload-btn';
-        uploadBtn.className = 'btn btn-secondary youtube-btn';
-        uploadBtn.innerHTML = '<span class="btn-icon">📹</span> YouTube에 업로드';
-        resultActions.appendChild(uploadBtn);
-
-        const statusDiv = document.createElement('div');
-        statusDiv.id = 'upload-status';
-        statusDiv.className = 'upload-status hidden';
-        resultSection.appendChild(statusDiv);
-
-        uploadBtn.onclick = () => uploadToYoutube(data.job_id);
-    } else {
-        uploadBtn.disabled = false;
-        uploadBtn.innerHTML = '<span class="btn-icon">📹</span> YouTube에 업로드';
-        document.getElementById('upload-status').classList.add('hidden');
-        uploadBtn.onclick = () => uploadToYoutube(data.job_id);
-    }
-
-    // Populate YouTube Metadata Section
-    const youtubeMetaSection = document.getElementById('youtube-meta-section');
-    const ytTitleInput = document.getElementById('yt-meta-title');
-    const ytDescTextarea = document.getElementById('yt-meta-desc');
-
-    if (currentScriptData) {
-        const getTitleStr = (vt) => typeof vt === 'object' ? `${vt.highlight || ''} ${vt.rest || ''}`.trim() : vt;
-        const defaultTitle = getTitleStr(currentScriptData.video_title) + " #Shorts";
-        ytTitleInput.value = currentScriptData.youtube_title || defaultTitle;
-
-        const desc = currentScriptData.youtube_description || "";
-        const tags = (currentScriptData.youtube_tags || []).map(t => `#${t.replace(/\s+/g, '')}`).join(' ');
-        ytDescTextarea.value = `${desc}\n\n${tags}`;
-
-        // Sync metadata edits back to scriptData
-        ytTitleInput.oninput = (e) => { currentScriptData.youtube_title = e.target.value; };
-        ytDescTextarea.oninput = (e) => { 
-            // Simple logic: split back into description and tags (heuristic)
-            const fullText = e.target.value;
-            const parts = fullText.split('\n\n');
-            currentScriptData.youtube_description = parts[0] || '';
-            // We don't necessarily need to parse tags back perfectly as the whole description is what matters for YT upload here
-        };
-
-        youtubeMetaSection.classList.remove('hidden');
-    }
-
-    resultVideo.play().catch(e => console.warn('Auto-play failed:', e));
-
-    // Use the download-specific API endpoint to force download on mobile
-    const filename = `shorts_${currentJobId}.mp4`;
-    downloadBtn.href = `${API_BASE}/api/download/${filename}`;
-    downloadBtn.download = filename;
-    
-    generateBtn.disabled = false;
-    generateBtn.classList.remove('loading');
-}
-
-function showError(msg) {
-    errorSection.classList.remove('hidden');
-    progressSection.classList.add('hidden');
-    errorMessage.textContent = msg;
-    generateBtn.disabled = false;
-    generateBtn.classList.remove('loading');
-}
-
-function resetSteps() {
-    document.querySelectorAll('.step').forEach(el => el.classList.remove('active', 'completed'));
-    progressFill.style.width = '0%';
-    progressPercent.textContent = '0%';
-    progressMessage.textContent = '준비 중...';
-}
-
-function handleRetry() {
-    errorSection.classList.add('hidden');
-    if (currentScriptData) {
-        console.log('[Retry] Retrying video generation from existing script...');
-        startVideoGeneration();
-    } else {
-        console.log('[Retry] No script data, resetting to start.');
-        resetUI();
-    }
-}
-
-function resetUI() {
-    currentJobId = null;
-    currentScriptData = null;
-    if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
-    }
-    inputSection.classList.remove('hidden');
-    progressSection.classList.add('hidden');
-    resultSection.classList.add('hidden');
-    errorSection.classList.add('hidden');
-    scriptSection.classList.add('hidden');
-    confirmActions.classList.add('hidden');
-    generateBtn.disabled = false;
-    generateBtn.classList.remove('loading');
-    topicInput.value = '';
-    directionInput.value = '';
-    tagsInput.value = '';
-    // Reset input mode to AI
-    inputMode = 'ai';
-    modeAiTab.classList.add('active');
-    modeManualTab.classList.remove('active');
-    aiModeContent.classList.remove('hidden');
-    manualModeContent.classList.add('hidden');
-    // Reset scene count to 12
-    selectedSceneCount = 12;
-    sceneCountOptions.forEach(opt => {
-        opt.classList.toggle('active', opt.dataset.count === '12');
-    });
-    topicInput.focus();
-}

@@ -5,13 +5,33 @@ import uuid
 import asyncio
 import logging
 import shutil
+import time
 from pathlib import Path
+from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, UploadFile, File, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from backend.config import TEMP_DIR, OUTPUT_DIR, UPLOADS_DIR
-from backend.services.script_generator import generate_script, generate_metadata_from_script
-from backend.services.image_generator import generate_all_images
+from backend.services.history_store import (
+    build_history_entry,
+    delete_history_entry,
+    get_history_entry,
+    list_history_entries,
+    save_history_entry,
+)
+from backend.services.script_generator import (
+    generate_script,
+    generate_metadata_from_script,
+    enrich_script_metadata,
+    sanitize_scene_scripts,
+)
+from backend.services.image_generator import (
+    IMAGEN_MODEL,
+    build_structured_scene_prompt,
+    generate_all_images,
+    get_imagen_client,
+    sanitize_visual_text,
+)
 from backend.services.narration_generator import generate_all_narrations, generate_narration, get_audio_duration
 from backend.services.subtitle_generator import generate_subtitles
 from backend.services.video_composer import compose_video
@@ -30,38 +50,49 @@ router = APIRouter(prefix="/api", tags=["shorts"])
 jobs: dict[str, dict] = {}
 
 
+async def _cleanup_old_files_safe():
+    """Non-blocking wrapper: run cleanup in a thread pool so the event loop is never blocked."""
+    await asyncio.to_thread(cleanup_old_files)
+
+
 def cleanup_old_files():
-    """Delete old files in output and temp directories to prevent accumulation.
-    NOTE: We do NOT delete uploads here - they are needed during video rendering!
+    """Clean transient temp files only.
+    Generated videos are preserved for the history board.
     """
-    logger.info("Cleaning up session files to prevent accumulation...")
-    
-    # 1. Clean output directory (MP4 files only)
-    if OUTPUT_DIR.exists():
-        for f in OUTPUT_DIR.glob("*.mp4"):
-            try:
-                f.unlink()
-            except Exception as e:
-                logger.warning(f"Could not delete output file {f}: {e}")
-                
-    # 2. DO NOT clean uploads directory here!
+    logger.info("Cleaning up transient temp files...")
+
+    # DO NOT clean output MP4 files here.
+    # They are now used by the persistent history board.
+    # DO NOT clean uploads directory here either.
     # User-uploaded images (output/uploads/) are needed by compose_video().
-    # They will be cleaned up after the render is complete.
-                    
-    # 3. Clean and recreate temp directory
-    if TEMP_DIR.exists():
+
+    TEMP_DIR.mkdir(exist_ok=True)
+
+    # Do not wipe the whole temp root. A retry can overlap with an in-flight job,
+    # and deleting the shared temp tree kills the running narration/render step.
+    active_job_ids = {
+        job_id for job_id, job in jobs.items()
+        if job.get("status") in {"pending", "generating_images", "generating_narration", "composing_video"}
+    }
+    cutoff = time.time() - (12 * 60 * 60)
+
+    for child in TEMP_DIR.iterdir():
+        if not child.is_dir():
+            continue
+        if child.name in active_job_ids:
+            continue
         try:
-            shutil.rmtree(TEMP_DIR)
-            TEMP_DIR.mkdir(exist_ok=True)
+            if child.stat().st_mtime < cutoff:
+                shutil.rmtree(child, ignore_errors=True)
         except Exception as e:
-            logger.warning(f"Could not clean temp directory: {e}")
+            logger.warning(f"Could not clean temp job directory {child}: {e}")
 
 
 class GenerateRequest(BaseModel):
     topic: str
     tags: list[str] = []
     direction: str = ""
-    style: str = "teacher-student"  # "teacher-student" or "expert-dialogue"
+    style: str = "star-instructor"  # Only Star Instructor now
     scene_count: int = 12  # 8, 10, or 12
 
 
@@ -74,8 +105,10 @@ class JobStatus(BaseModel):
     status: str
     progress: int
     message: str = ""
-    video_url: str | None = None
-    script_data: dict | None = None
+    logs: list[str] = []
+    video_url: Optional[str] = None
+    script_data: Optional[dict] = None
+    history_id: Optional[str] = None
 
 
 class YouTubeUploadRequest(BaseModel):
@@ -83,6 +116,22 @@ class YouTubeUploadRequest(BaseModel):
     title: str
     description: str
     tags: list[str] = []
+
+
+class HistoryItem(BaseModel):
+    id: str
+    job_id: str
+    created_at: str
+    topic: str = ""
+    subject: str = ""
+    video_title: str = ""
+    youtube_title: str = ""
+    youtube_description: str = ""
+    youtube_tags: list[str] = []
+    situation: str = ""
+    scene_count: int = 0
+    video_url: str
+    script_data: Optional[dict] = None
 
 
 @router.post("/login", response_model=Token)
@@ -168,33 +217,28 @@ class OverlayImageRequest(BaseModel):
 @router.post("/generate-image")
 async def generate_overlay_image(req: OverlayImageRequest, current_user: str = Depends(get_current_user)):
     """Generate an AI illustration image for use as an overlay."""
-    from google import genai
     from google.genai import types
-    from backend.config import GOOGLE_GEMINI_API
-
-    client = genai.Client(api_key=GOOGLE_GEMINI_API)
 
     # Sync style requirements with the main image generator (2D Vector Animation)
-    illustration_prompt = f"""[VISUAL_TASK]
-Create a high-quality professional illustration of: "{req.prompt}"
+    safe_prompt = sanitize_visual_text(req.prompt)
 
-[STRICT_STYLE_GUIDE]
-- Style: Professional flat 2D educational vector animation.
-- Visuals: Clean vector illustration, solid color fills, thin outlines. 
-- Aesthetic: Modern educational YouTube style.
-- Lighting: Even soft lighting, 100% 2D flat, NO 3D effects.
-
-[CORE_VISUAL_COMMANDS]
-- Orientation: Square (1:1 aspect ratio).
-- Strictly NO speech bubbles, NO dialogue boxes, NO thought bubbles.
-- Strictly NO text, NO labels, NO signs, NO words, NO numbers.
-- The image must be 100% PURE VISUAL with zero written elements.
-- Clean composition, high detail vector art.
+    scene_context = sanitize_visual_text(req.scene_script)
+    illustration_prompt = build_structured_scene_prompt(
+        visual_desc=safe_prompt,
+        scene_id=0,
+        topic=safe_prompt,
+        situation=scene_context,
+        composition_mode="square",
+    ) + """
+[Overlay Specific]
+- Generate the main visual idea as a clean isolated square-friendly composition for reuse as an overlay asset.
+- Keep the composition centered and self-contained.
+- The result must feel like a polished editorial illustration, not a flat icon pack or photoreal movie still.
 """
 
     # Generate a deterministic hash for the prompt to use as a cache key
     import hashlib
-    prompt_hash = hashlib.md5(illustration_prompt.encode()).hexdigest()
+    prompt_hash = hashlib.md5(f"star_instructor_v2|{illustration_prompt}".encode()).hexdigest()
     
     # Global image cache directory
     from backend.services.image_generator import CACHE_DIR
@@ -214,8 +258,9 @@ Create a high-quality professional illustration of: "{req.prompt}"
     for attempt in range(max_retries):
         try:
             logger.info(f"[AI Image] Generating overlay (Attempt {attempt+1}/{max_retries})...")
-            response = client.models.generate_images(
-                model="models/imagen-4.0-fast-generate-001",
+            response = await asyncio.to_thread(
+                get_imagen_client().models.generate_images,
+                model=IMAGEN_MODEL,
                 prompt=illustration_prompt,
                 config=types.GenerateImagesConfig(
                     number_of_images=1,
@@ -277,9 +322,6 @@ Create a high-quality professional illustration of: "{req.prompt}"
 @router.post("/generate-video")
 async def start_video_generation(req: VideoGenerateRequest, background_tasks: BackgroundTasks, current_user: str = Depends(get_current_user)):
     """Start video generation using provided script and assets."""
-    # Step 0: Cleanup old files
-    cleanup_old_files()
-    
     job_id = str(uuid.uuid4())[:8]
     job_dir = TEMP_DIR / job_id
     job_dir.mkdir(exist_ok=True)
@@ -293,7 +335,9 @@ async def start_video_generation(req: VideoGenerateRequest, background_tasks: Ba
     }
 
     logger.info(f"[{job_id}] Video Job created from script.")
+    # Pipeline runs first; cleanup is a non-blocking fire-and-forget after the response.
     background_tasks.add_task(run_video_pipeline, job_id, req.script_data, job_dir)
+    background_tasks.add_task(_cleanup_old_files_safe)
 
     return {"job_id": job_id, "status": "pending"}
 
@@ -336,10 +380,59 @@ async def get_status(job_id: str):
             status="not_found",
             progress=0,
             message="작업을 찾을 수 없습니다.",
+            logs=[]
         )
 
     job = jobs[job_id]
     return JobStatus(job_id=job_id, **job)
+
+
+@router.get("/history", response_model=list[HistoryItem])
+async def get_history(current_user: str = Depends(get_current_user)):
+    return [HistoryItem(**item) for item in list_history_entries()]
+
+
+@router.get("/history/{entry_id}", response_model=HistoryItem)
+async def get_history_detail(entry_id: str, current_user: str = Depends(get_current_user)):
+    item = get_history_entry(entry_id)
+    if not item:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="기록을 찾을 수 없습니다.")
+
+    return HistoryItem(**item)
+
+
+@router.delete("/history/{entry_id}")
+async def delete_history(entry_id: str, current_user: str = Depends(get_current_user)):
+    return _delete_history_item(entry_id)
+
+
+@router.post("/history/{entry_id}/delete")
+async def delete_history_fallback(entry_id: str, current_user: str = Depends(get_current_user)):
+    return _delete_history_item(entry_id)
+
+
+def _delete_history_item(entry_id: str):
+    item = delete_history_entry(entry_id)
+    if not item:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="기록을 찾을 수 없습니다.")
+
+    video_url = item.get("video_url", "")
+    if video_url.startswith("/output/"):
+        filename = Path(video_url).name
+    else:
+        filename = f"shorts_{item.get('job_id', '')}.mp4"
+
+    if filename:
+        video_path = OUTPUT_DIR / filename
+        try:
+            if video_path.exists() and video_path.is_file():
+                video_path.unlink()
+        except Exception as e:
+            logger.warning(f"Could not delete history video file {video_path}: {e}")
+
+    return {"status": "deleted", "id": entry_id}
 
 
 @router.get("/download/{filename}")
@@ -362,6 +455,13 @@ async def download_file(filename: str):
 async def run_video_pipeline(job_id: str, script_data: dict, job_dir: Path):
     """Run the asset generation and video composition steps."""
     try:
+        sanitize_scene_scripts(script_data)
+        await enrich_script_metadata(
+            script_data,
+            topic=script_data.get("topic", "") or script_data.get("subject", ""),
+            situation=script_data.get("situation_setting", {}).get("situation", ""),
+        )
+
         scenes = script_data["scenes"]
         characters_list = script_data.get("characters", [])
         # Create a lookup for character details
@@ -370,6 +470,7 @@ async def run_video_pipeline(job_id: str, script_data: dict, job_dir: Path):
 
         # Step 2: Generate Images
         logger.info(f"[{job_id}] Step 2/4: Generating images...")
+        _update_job(job_id, "generating_images", 10, "🎨 배경 이미지 생성 시작...")
         
         # Extract topic and situation for image context
         video_title_meta = script_data.get("video_title", {})
@@ -382,10 +483,12 @@ async def run_video_pipeline(job_id: str, script_data: dict, job_dir: Path):
 
         image_paths = []
         for i, scene in enumerate(scenes):
+            # 10% to 40%
             progress = 10 + int(30 * i / num_scenes)
-            _update_job(job_id, "generating_images", progress, f"🎨 배경 이미지 생성 중... ({i+1}/{num_scenes})")
+            msg = f"🎨 배경 이미지 생성 중... ({i+1}/{num_scenes})"
+            _update_job(job_id, "generating_images", progress, msg)
             
-            # Enrich scene with character description for image generation
+            # Enrich scene with character details
             char_id = scene.get("character_id", "char_1")
             char_meta = char_lookup.get(char_id, {})
             enriched_scene = {
@@ -396,7 +499,12 @@ async def run_video_pipeline(job_id: str, script_data: dict, job_dir: Path):
             from backend.services.image_generator import generate_scene_image
             images_dir = job_dir / "images"
             images_dir.mkdir(exist_ok=True)
-            path = await generate_scene_image(enriched_scene, images_dir, topic=topic_context, situation=situation_context)
+            path = await generate_scene_image(
+                enriched_scene, images_dir, 
+                topic=topic_context, 
+                situation=situation_context,
+                log_callback=lambda m: _update_job(job_id, "generating_images", progress, m)
+            )
             image_paths.append(path)
 
         _update_job(job_id, "generating_images", 40, f"🎨 이미지 {num_scenes}개 완성!")
@@ -409,18 +517,24 @@ async def run_video_pipeline(job_id: str, script_data: dict, job_dir: Path):
         
         if full_audio_path:
             logger.info(f"[{job_id}] Full audio provided: {full_audio_path}. Skipping individual TTS generation.")
-            _update_job(job_id, "generating_narration", 60, "🎙️ 전체 음성 파일 처리 중...")
+            _update_job(job_id, "generating_narration", 45, "🎙️ 전체 음성 파일 처리 중...")
             
             # Measure actual duration
             full_audio_abs = OUTPUT_DIR / full_audio_path
+            if not full_audio_abs.exists():
+                raise Exception(f"전체 음성 파일을 찾을 수 없습니다: {full_audio_path}")
+                
             total_actual_duration = get_audio_duration(str(full_audio_abs))
+            _update_job(job_id, "generating_narration", 50, f"🎙️ 오디오 길이 측정 완료: {total_actual_duration:.2f}초")
             
             # Predict total duration from AI
             total_predicted_duration = sum(s.get("duration", 5.0) for s in scenes)
             if total_predicted_duration == 0: total_predicted_duration = 1.0 # Safety
             
             scaling_factor = total_actual_duration / total_predicted_duration
-            logger.info(f"[{job_id}] Scaling scenes by {scaling_factor:.2f} to fit {total_actual_duration:.2f}s audio.")
+            msg = f"🎙️ 장면별 타이밍 조정 중... (배율: {scaling_factor:.2f})"
+            _update_job(job_id, "generating_narration", 55, msg)
+            logger.info(f"[{job_id}] {msg}")
             
             # Rescale each scene's duration
             for scene in scenes:
@@ -429,11 +543,17 @@ async def run_video_pipeline(job_id: str, script_data: dict, job_dir: Path):
             # Create dummy narration infos for compose_video compatibility
             for i in range(num_scenes):
                 narration_infos.append({"path": "", "duration": 0})
+            
+            _update_job(job_id, "generating_narration", 65, "🎙️ 음성 동기화 완료!")
         else:
             _update_job(job_id, "generating_narration", 40, f"🎙️ 나레이션 생성 중... (0/{num_scenes})")
             
             # Per-scene generation with batch normalization
-            narration_infos = await generate_all_narrations(script_data, job_dir)
+            narration_infos = await generate_all_narrations(
+                script_data, 
+                job_dir,
+                progress_callback=lambda p, m: _update_job(job_id, "generating_narration", 40 + int(p * 30), m)
+            )
             
             # Sync scene durations with generated audio
             for i, result in enumerate(narration_infos):
@@ -447,22 +567,28 @@ async def run_video_pipeline(job_id: str, script_data: dict, job_dir: Path):
 
         # Step 4: Composing Video (Remotion)
         logger.info(f"[{job_id}] Step 4/4: Composing video...")
-        _update_job(job_id, "composing_video", 80, "🎬 영상 합성 중... (Remotion 렌더링)")
-
+        _update_job(job_id, "composing_video", 75, "🎬 영상 조립 및 자막 생성 중...")
+        
         # Get durations for subtitles (synchronized with scene pauses)
         durations = [s["duration"] for s in scenes]
-
         generate_subtitles(scenes, durations, job_dir)
 
+        # Pass _update_job to compose_video for granular progress reporting
         video_path = await compose_video(
             scenes, image_paths, narration_infos, job_dir, job_id,
-            scenes_metadata=script_data
+            scenes_metadata=script_data,
+            progress_callback=lambda p, m: _update_job(job_id, "composing_video", 80 + int(p * 19), m)
         )
 
         logger.info(f"[{job_id}] ✅ Video completed: {video_path}")
+        video_url = f"/output/shorts_{job_id}.mp4"
+        history_entry = save_history_entry(
+            build_history_entry(job_id=job_id, script_data=script_data, video_url=video_url)
+        )
         _update_job(
-            job_id, "completed", 100, "✅ 완성!",
-            video_url=f"/output/shorts_{job_id}.mp4",
+            job_id, "completed", 100, "✅ 모든 작업 완성!",
+            video_url=video_url,
+            history_id=history_entry["id"],
         )
 
     except Exception as e:
@@ -471,14 +597,24 @@ async def run_video_pipeline(job_id: str, script_data: dict, job_dir: Path):
 
 
 def _update_job(job_id: str, status: str, progress: int, message: str, **kwargs):
-    """Update job status."""
+    """Update job status and append to log history."""
     if job_id in jobs:
-        jobs[job_id].update({
+        job = jobs[job_id]
+        job.update({
             "status": status,
             "progress": progress,
             "message": message,
             **kwargs,
         })
+        
+        # Maintain a history of logs for this job
+        if "logs" not in job:
+            job["logs"] = []
+        
+        # Avoid duplicate consecutive logs if same message
+        if not job["logs"] or job["logs"][-1] != message:
+            job["logs"].append(message)
+            
         logger.info(f"[{job_id}] Status: {status} | {progress}% | {message}")
 
 

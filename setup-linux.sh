@@ -38,7 +38,7 @@ if [ -d "video-engine" ]; then
     cd video-engine
     npm install
     # Ensure Playwright/Chromium dependencies for Remotion
-    npx remotion browser ensure
+    npx remotion browser ensure --chrome-mode=chrome-for-testing
     cd ..
 else
     echo "⚠️ Warning: video-engine directory not found!"
