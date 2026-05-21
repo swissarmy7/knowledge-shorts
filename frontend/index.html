@@ -123,6 +123,22 @@
                                 <div id="script-stats" class="script-stats"></div>
                             </div>
 
+                            <!-- Voice Setting Section -->
+                            <div class="metadata-card" style="margin-top: 16px; margin-bottom: 16px;">
+                                <div class="editor-label">🎙️ 나레이션 목소리 설정</div>
+                                <div class="title-inputs" style="display: grid; gap: 10px;">
+                                    <label class="title-field">
+                                        <span>성별 및 목소리 톤</span>
+                                        <select id="voice-gender-select" onchange="handleVoiceChange()" style="background: #1a1a1a; border: 1px solid #333; border-radius: 4px; padding: 9px 12px; color: #fff; font-size: 13px; outline: none; cursor: pointer;">
+                                            <option value="male_young">🧑 차분한 청년 남성 (M2 - 기본값)</option>
+                                            <option value="male_warm">👨‍🏫 따뜻한 중년 남성 (M1)</option>
+                                            <option value="female_young">👧 발랄한 청년 여성 (F2)</option>
+                                            <option value="female_calm">👩‍🏫 차분한 중년 여성 (F1)</option>
+                                        </select>
+                                    </label>
+                                </div>
+                            </div>
+
                             <div id="scenes-container" class="scenes-stack">
                                 <!-- Scenes dynamic content -->
                             </div>

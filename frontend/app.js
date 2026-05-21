@@ -43,6 +43,7 @@ const youtubeTitleInput = document.getElementById('youtube-title-input');
 const youtubeDescriptionInput = document.getElementById('youtube-description-input');
 const youtubeTagsInput = document.getElementById('youtube-tags-input');
 const fullAudioStatus = document.getElementById('full-audio-status');
+const voiceGenderSelect = document.getElementById('voice-gender-select');
 const confirmGenerateBtn = document.getElementById('confirm-generate-btn');
 const backToInputBtn = document.getElementById('back-to-input-btn');
 const regenerateScriptBtn = document.getElementById('regenerate-script-btn');
@@ -261,6 +262,26 @@ function showScriptPreview(scriptData) {
         fullAudioStatus.classList.remove('hidden');
     } else {
         fullAudioStatus.classList.add('hidden');
+    }
+
+    // Populate Voice Selection
+    const narrator = (scriptData.characters || []).find(c => c.id === 'narrator');
+    if (narrator && voiceGenderSelect) {
+        const cat = (narrator.voice_category || '').toLowerCase();
+        const age = (narrator.age_group || '').toLowerCase();
+        if (cat.includes('female')) {
+            if (age === 'middle-aged' || age === 'elder') {
+                voiceGenderSelect.value = 'female_calm';
+            } else {
+                voiceGenderSelect.value = 'female_young';
+            }
+        } else {
+            if (age === 'middle-aged' || age === 'elder') {
+                voiceGenderSelect.value = 'male_warm';
+            } else {
+                voiceGenderSelect.value = 'male_young';
+            }
+        }
     }
 
     // Render Scenes
@@ -518,6 +539,27 @@ window.handleMetadataEdit = () => {
         .split(',')
         .map((tag) => tag.trim())
         .filter(Boolean);
+};
+window.handleVoiceChange = () => {
+    if (!currentScriptData) return;
+    const narrator = (currentScriptData.characters || []).find(c => c.id === 'narrator');
+    if (!narrator) return;
+    
+    const val = voiceGenderSelect.value;
+    if (val === 'male_warm') {
+        narrator.voice_category = 'male';
+        narrator.age_group = 'middle-aged';
+    } else if (val === 'male_young') {
+        narrator.voice_category = 'male';
+        narrator.age_group = 'young-adult';
+    } else if (val === 'female_calm') {
+        narrator.voice_category = 'female';
+        narrator.age_group = 'middle-aged';
+    } else if (val === 'female_young') {
+        narrator.voice_category = 'female';
+        narrator.age_group = 'young-adult';
+    }
+    console.log('[VoiceChange] Narrator voice updated to:', narrator.voice_category, narrator.age_group);
 };
 window.copyFullScript = () => {
     if (!currentScriptData) return;
