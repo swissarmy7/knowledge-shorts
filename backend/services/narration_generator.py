@@ -8,24 +8,23 @@ import asyncio
 import subprocess
 import logging
 from pathlib import Path
-from backend.services.google_tts_service import get_voice_name
-from backend.services.supertonic_local_service import generate_supertonic_local
+from backend.services.supertonic_local_service import generate_supertonic_local, get_voice_name
 
 logger = logging.getLogger("shorts")
 
 SCENE_DURATION_TARGETS = {
-    8: {"min_seconds": 54.0, "max_seconds": 68.0},
-    10: {"min_seconds": 80.0, "max_seconds": 96.0},
-    12: {"min_seconds": 98.0, "max_seconds": 116.0},
+    8: {"min_seconds": 47.0, "max_seconds": 57.0},
+    10: {"min_seconds": 46.0, "max_seconds": 56.0},
+    12: {"min_seconds": 43.0, "max_seconds": 54.0},
 }
 
 
-def get_duration_target(scene_count: int) -> dict:
+def get_duration_target(scene_count: int, speed: str = "1.12") -> dict:
     return SCENE_DURATION_TARGETS.get(
         scene_count,
         {
-            "min_seconds": max(60.0, scene_count * 7.0),
-            "max_seconds": min(110.0, scene_count * 9.0),
+            "min_seconds": 47.0 if scene_count < 9 else (43.0 if scene_count > 11 else 46.0),
+            "max_seconds": 57.0 if scene_count < 9 else (54.0 if scene_count > 11 else 56.0),
         },
     )
 
@@ -40,15 +39,15 @@ def get_base_speed_factor(scenes: list[dict], scene_count: int) -> float:
     total_chars = sum(len(script.replace(" ", "")) for script in scripts)
     avg_chars = total_chars / max(scene_count, 1)
 
-    base_speed = 1.05
+    base_speed = 1.00
 
-    # Nudge slightly when the script is clearly dense; never exceed 1.15.
-    if avg_chars >= 55:
+    # Keep the default close to normal speed and only nudge upward for very dense scripts.
+    if avg_chars >= 48:
         base_speed += 0.03
-    if avg_chars >= 80:
+    if avg_chars >= 62:
         base_speed += 0.03
 
-    return min(base_speed, 1.15)
+    return min(base_speed, 1.10)
 
 
 def clean_narration_text(text: str) -> str:
@@ -72,8 +71,9 @@ async def generate_narration(
     gender: str = "female",
     role: str = "student",
     age_group: str = "young-adult",
+    speed: float = 1.05,
 ) -> dict:
-    """Generate TTS narration for a single scene using Google Cloud TTS Chirp 3.0 HD."""
+    """Generate TTS narration for a single scene using local Supertonic model with custom speed."""
     audio_dir = job_dir / "audio"
     audio_dir.mkdir(exist_ok=True)
 
@@ -83,13 +83,14 @@ async def generate_narration(
     # Clean text 
     clean_text = clean_narration_text(text)
 
-    # Select Chirp 3.0 HD voice (we still use the mapping but supertonic_local will map it to its own styles)
+    # Select best Supertonic voice (M1~M5, F1~F5)
     voice_name = get_voice_name(character_id, gender, role, age_group)
     
     success = await generate_supertonic_local(
         text=clean_text, 
         voice_name=voice_name, 
-        output_path=str(audio_path)
+        output_path=str(audio_path),
+        speed=speed
     )
     
     if not success:
@@ -108,8 +109,18 @@ async def generate_all_narrations(
     """
     scenes = script_data.get("scenes", [])
     num_scenes = len(scenes)
-    duration_target = script_data.get("duration_target") or get_duration_target(num_scenes)
-    base_speed_factor = get_base_speed_factor(scenes, num_scenes)
+    user_speed = script_data.get("tts_settings", {}).get("speed") or "1.12"
+    duration_target = script_data.get("duration_target") or get_duration_target(num_scenes, user_speed)
+    
+    # User manual speed override
+    if user_speed:
+        try:
+            base_speed_factor = float(user_speed)
+        except Exception:
+            base_speed_factor = 1.12
+    else:
+        base_speed_factor = 1.12
+        
     characters_map = {c["id"]: c for c in script_data.get("characters", [])}
     audio_dir = job_dir / "audio"
     audio_dir.mkdir(exist_ok=True)
@@ -131,6 +142,7 @@ async def generate_all_narrations(
             gender=char_info.get("voice_category", "female"),
             role="teacher" if "teacher" in char_id else "student",
             age_group=char_info.get("age_group", "young-adult"),
+            speed=base_speed_factor,
         )
         results.append(result)
         logger.info(f"[TTS] Scene {scene['scene_id']} done: {result['duration']:.2f}s")
@@ -143,10 +155,10 @@ async def generate_all_narrations(
         f"[NarrationSpeed] scene_count={num_scenes}, "
         f"base_speed_factor={base_speed_factor:.2f}"
     )
-    if progress_callback and base_speed_factor > 1.04:
+    if progress_callback and base_speed_factor > 1.01:
         progress_callback(0.87, f"⚡ 정보량 기준 기본 나레이션 속도 {base_speed_factor:.2f}배 적용 중...")
 
-    filters = f"loudnorm,atempo={base_speed_factor:.4f}"
+    filters = "loudnorm"
     fade_dur = 0.03  # 30ms fade to prevent clicks
     
     for i, result in enumerate(results):
@@ -199,9 +211,8 @@ async def generate_all_narrations(
         results[i]["duration"] = final_dur
         logger.info(f"[BatchNorm] Scene {scenes[i]['scene_id']}: {final_dur:.2f}s")
 
-    # --- Step 3: Shorts duration guard (30s ~ 90s) ---
-    # YouTube Shorts MUST be under 90 seconds. If total audio exceeds the limit,
-    # apply additional atempo speed-up uniformly. If too short, slow down slightly.
+    # --- Step 3: Shorts duration guard (strict 60s cap) ---
+    # All shorts types must stay within the configured 60-second-oriented window.
     SHORTS_MIN = float(duration_target["min_seconds"])
     SHORTS_MAX = float(duration_target["max_seconds"])
     

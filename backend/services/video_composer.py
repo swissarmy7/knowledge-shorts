@@ -7,19 +7,26 @@ import os
 import re
 import json
 import shutil
+import signal
 import asyncio
 import subprocess
+import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Optional
 from backend.config import (
     OUTPUT_DIR,
+    TARGET_DURATION,
     VIDEO_WIDTH,
     VIDEO_HEIGHT,
     BASE_DIR,
     REMOTION_CODEC,
     REMOTION_CONCURRENCY,
+    REMOTION_GL,
     REMOTION_BROWSER_EXECUTABLE,
     REMOTION_CHROME_MODE,
+    REMOTION_RENDER_TIMEOUT,
+    REMOTION_RENDER_STALL_TIMEOUT,
 )
 
 # Remotion project directory
@@ -58,6 +65,7 @@ async def compose_video(
     job_dir: Path,
     job_id: str,
     scenes_metadata: dict = None,
+    scene_videos: Optional[list[Optional[str]]] = None,
     progress_callback: callable = None,
 ) -> str:
     """Compose final video using Remotion."""
@@ -68,10 +76,16 @@ async def compose_video(
     public_dir = VIDEO_ENGINE_DIR / "public"
     images_dir = public_dir / "images"
     audio_dir = public_dir / "audio"
+    videos_dir = public_dir / "videos"
     uploads_dir = public_dir / "uploads"
     images_dir.mkdir(parents=True, exist_ok=True)
     audio_dir.mkdir(parents=True, exist_ok=True)
+    videos_dir.mkdir(parents=True, exist_ok=True)
     uploads_dir.mkdir(parents=True, exist_ok=True)
+
+    # Start from a clean Remotion public asset set. Stale images in public/ can
+    # make a fresh render reference another job's assets.
+    _cleanup_public(images_dir, audio_dir, videos_dir)
 
     # Copy Full Narration if exists
     full_narration_rel = None
@@ -82,8 +96,9 @@ async def compose_video(
             shutil.copy2(str(src_full), str(dst_full))
             full_narration_rel = "full_narration.mp3"
 
-    # Copy images and audio to Remotion public folder
+    # Copy images and audio to Remotion public folder.
     scene_data_list = []
+    scene_videos = scene_videos or [None for _ in scenes]
     for i, (scene, image_path, narration) in enumerate(
         zip(scenes, images, narrations)
     ):
@@ -93,6 +108,23 @@ async def compose_video(
         src_img = Path(image_path)
         dst_img = images_dir / f"scene_{scene_id}.png"
         shutil.copy2(str(src_img), str(dst_img))
+
+        # Optional legacy per-scene video clip support. Remotion's normal <Video>
+        # uses the browser decoder. The Remotion-managed headless Chrome build on
+        # this server does not reliably decode H.264 MP4, even when ffprobe says
+        # the container is valid. Convert scene clips to VP8 WebM before handing
+        # them to Remotion; if conversion fails, fall back visibly to the still
+        # scene image instead of crashing the whole render at frame 0.
+        video_path_rel = None
+        scene_video_src = scene_videos[i] if i < len(scene_videos) else None
+        if scene_video_src:
+            src_video = Path(scene_video_src)
+            if src_video.exists():
+                dst_video = videos_dir / f"scene_{scene_id}.webm"
+                if _prepare_scene_video_for_remotion(src_video, dst_video):
+                    video_path_rel = f"videos/scene_{scene_id}.webm"
+                else:
+                    print(f"⚠️ [Remotion] Scene {scene_id}: scene video not browser-playable; using still image fallback for this scene")
 
         # Copy audio if not using full narration or if provided
         audio_path_rel = None
@@ -109,6 +141,11 @@ async def compose_video(
         processed_overlays = []
         for ov in scene.get("overlays", []):
             ov_content = ov.get("content", "")
+            if scene.get("_main_image_from_overlay") and ov.get("type") == "image":
+                # The selected editor image is already used as the full scene
+                # visual layer. Rendering it again as an overlay would duplicate
+                # the same picture on top of itself.
+                continue
             if ov_content.startswith("uploads/"):
                 # Copy the upload to remotion public
                 src_upload = OUTPUT_DIR / ov_content
@@ -148,6 +185,7 @@ async def compose_video(
         scene_data_list.append({
             "sceneId": scene_id,
             "imagePath": f"images/scene_{scene_id}.png",
+            "videoPath": video_path_rel or "",
             "audioPath": audio_path_rel or "",
             "script": scene.get("script", ""),
             "durationInSeconds": scene.get("duration", 5.0),
@@ -181,7 +219,7 @@ async def compose_video(
     for sd in scene_data_list:
         img_path = public_dir / sd["imagePath"]
         aud_path = public_dir / sd["audioPath"]
-        print(f"  🖼️ Scene {sd['sceneId']}: image={img_path.exists()}, audio={aud_path.exists()}")
+        print(f"  🖼️ Scene {sd['sceneId']}: image={img_path.exists()}, video={bool(sd.get('videoPath'))}, audio={aud_path.exists()}")
         for ov in sd.get("overlays", []):
             if ov.get("type") == "image":
                 ov_path = public_dir / ov["content"]
@@ -201,6 +239,8 @@ async def compose_video(
             f"ShortsVideo "
             f"{output_path} "
             f"--codec {REMOTION_CODEC} "
+            f"--gl {REMOTION_GL} "
+            f"--concurrency {REMOTION_CONCURRENCY} "
             f"--props {props_rel} "
             f"--headless=new "
             f"--chrome-mode {REMOTION_CHROME_MODE} "
@@ -224,22 +264,94 @@ async def compose_video(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(VIDEO_ENGINE_DIR),
-            env=render_env
+            env=render_env,
+            preexec_fn=os.setsid,
         )
 
         total_frames = 1
         current_frame = 0
         last_progress_bucket = -1
+        render_started_at = time.monotonic()
+        last_output_at = render_started_at
+        last_frame_progress_at = render_started_at
+        last_file_activity_at = render_started_at
+        last_output_size = output_path.stat().st_size if output_path.exists() else 0
+        temp_output_sizes: dict[str, int] = {}
+        last_file_progress_notice_at = 0.0
 
         # Pattern to match progress in Remotion output
         frame_pattern = re.compile(r"(\d+)/(\d+)")
 
+        async def terminate_render_process(reason: str):
+            print(f"⏱️ [Remotion] Terminating stalled render for job {job_id}: {reason}")
+            with suppress(ProcessLookupError):
+                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+            try:
+                await asyncio.wait_for(process.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                with suppress(ProcessLookupError):
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                with suppress(Exception):
+                    await process.wait()
+
+        async def watchdog():
+            nonlocal last_file_activity_at, last_output_size, last_file_progress_notice_at
+            while process.returncode is None:
+                await asyncio.sleep(5)
+                now = time.monotonic()
+
+                # Remotion often stops printing after 95% while its ffmpeg/compositor is
+                # still writing. During render it may write /tmp/react-motion-render*/
+                # pre-encode.mp4 first and only later move/mux to the final output path.
+                # Treat both final MP4 growth and temp pre-encode growth as activity.
+                watched_files = [output_path]
+                watched_files.extend(Path("/tmp").glob("react-motion-render*/pre-encode.mp4"))
+
+                for watched in watched_files:
+                    if not watched.exists():
+                        continue
+                    current_size = watched.stat().st_size
+                    key = str(watched)
+                    previous_size = last_output_size if watched == output_path else temp_output_sizes.get(key, 0)
+                    if current_size > previous_size:
+                        if watched == output_path:
+                            last_output_size = current_size
+                        else:
+                            temp_output_sizes[key] = current_size
+                        last_file_activity_at = now
+                        if progress_callback and now - last_file_progress_notice_at > 30:
+                            last_file_progress_notice_at = now
+                            label = "최종 MP4" if watched == output_path else "임시 MP4"
+                            progress_callback(
+                                0.97,
+                                f"🎬 Remotion {label} 작성 중... ({current_size / (1024 * 1024):.1f}MB)",
+                            )
+
+                # Near the last frames Remotion can spend a long time finalizing even
+                # without visible file growth. Give that phase a larger grace window.
+                stall_timeout = REMOTION_RENDER_STALL_TIMEOUT
+                if total_frames > 1 and current_frame >= max(1, total_frames - 2):
+                    stall_timeout = max(stall_timeout, 900)
+
+                if REMOTION_RENDER_TIMEOUT and now - render_started_at > REMOTION_RENDER_TIMEOUT:
+                    return f"total timeout {REMOTION_RENDER_TIMEOUT:.0f}s exceeded"
+
+                # stdout can keep trickling even when Chrome/compositor is stuck.
+                # Treat only real frame advancement or MP4 growth as render
+                # activity. This prevents 95% hangs where CPU spins forever while
+                # pre-encode.mp4 and frame counters do not move.
+                last_activity_at = max(last_frame_progress_at, last_file_activity_at)
+                if stall_timeout and now - last_activity_at > stall_timeout:
+                    return f"no Remotion frame progress or MP4 growth for {stall_timeout:.0f}s"
+            return None
+
         async def stream_reader(stream, is_stderr=False):
-            nonlocal total_frames, current_frame, last_progress_bucket
+            nonlocal total_frames, current_frame, last_progress_bucket, last_output_at, last_frame_progress_at
             while True:
                 line = await stream.readline()
                 if not line:
                     break
+                last_output_at = time.monotonic()
                 line_text = line.decode("utf-8", errors="replace").strip()
                 if line_text:
                     if not is_stderr: 
@@ -251,7 +363,10 @@ async def compose_video(
                     if progress_callback:
                         match = frame_pattern.search(line_text)
                         if match:
-                            current_frame = int(match.group(1))
+                            next_frame = int(match.group(1))
+                            if next_frame > current_frame:
+                                last_frame_progress_at = time.monotonic()
+                            current_frame = next_frame
                             total_frames = int(match.group(2))
                             if total_frames > 0:
                                 percent = current_frame / total_frames
@@ -268,18 +383,49 @@ async def compose_video(
                                 f"🎬 {line_text}",
                             )
 
-        # Process stdout and stderr concurrently
-        await asyncio.gather(
-            stream_reader(process.stdout),
-            stream_reader(process.stderr, is_stderr=True)
-        )
+        stdout_task = asyncio.create_task(stream_reader(process.stdout))
+        stderr_task = asyncio.create_task(stream_reader(process.stderr, is_stderr=True))
+        wait_task = asyncio.create_task(process.wait())
+        watchdog_task = asyncio.create_task(watchdog())
 
-        return_code = await process.wait()
+        done, pending = await asyncio.wait(
+            {wait_task, watchdog_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if watchdog_task in done:
+            reason = watchdog_task.result()
+            if reason:
+                if progress_callback:
+                    progress_callback(0.95, f"⏱️ Remotion 렌더링 마무리 정체 감지, 출력 파일 확인 중... ({reason})")
+                await terminate_render_process(reason)
+                await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+                # Remotion can render all frames and then hang during final cleanup.
+                # If a valid MP4 was already written, keep it instead of falling back
+                # to the static FFmpeg composer (which loses titles/subtitles/effects).
+                if output_path.exists() and output_path.stat().st_size > 1024 and _is_valid_video(output_path):
+                    print(f"✅ [Remotion] Using already-written output after watchdog: {output_path}")
+                    if progress_callback:
+                        progress_callback(0.98, "🎬 Remotion 출력 파일 확인 완료, YouTube 포맷 변환 중...")
+                    await _reencode_for_youtube(output_path)
+                    await _enforce_duration_limit(output_path, max_duration=float(TARGET_DURATION))
+                    if progress_callback:
+                        progress_callback(1.0, "🎬 렌더링 완료!")
+                    return str(output_path)
+                if output_path.exists():
+                    print(f"⚠️ [Remotion] Watchdog output is not a finalized MP4 yet: {output_path} ({output_path.stat().st_size} bytes)")
+                raise asyncio.TimeoutError(reason)
+
+        watchdog_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await watchdog_task
+        return_code = await wait_task
+        await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
 
         if return_code != 0:
-            print(f"❌ Remotion render failed with exit code {return_code}")
-            return await _compose_with_ffmpeg(
-                scenes, images, narrations, job_dir, job_id
+            message = f"Remotion render failed with exit code {return_code}"
+            print(f"❌ {message}")
+            return await _compose_with_ffmpeg_if_allowed(
+                scenes, images, narrations, job_dir, job_id, message
             )
 
         print(f"✅ [Remotion] Render successful: {output_path}")
@@ -287,23 +433,97 @@ async def compose_video(
             progress_callback(0.98, "🎬 YouTube 호환 포맷으로 변환 중...")
         await _reencode_for_youtube(output_path)
         if progress_callback:
+            progress_callback(0.99, f"⏱️ 최종 길이 {TARGET_DURATION:.0f}초 제한 확인 중...")
+        await _enforce_duration_limit(output_path, max_duration=float(TARGET_DURATION))
+        if progress_callback:
             progress_callback(1.0, "🎬 렌더링 완료!")
 
         return str(output_path)
 
     except (asyncio.TimeoutError, FileNotFoundError) as e:
-        print(f"❌ Remotion failed ({e}), falling back to FFmpeg")
-        return await _compose_with_ffmpeg(
-            scenes, images, narrations, job_dir, job_id
+        print(f"❌ Remotion failed ({e})")
+        return await _compose_with_ffmpeg_if_allowed(
+            scenes, images, narrations, job_dir, job_id, str(e)
         )
     except Exception as e:
         print(f"❌ Unexpected error during Remotion render: {type(e).__name__}: {e}")
-        return await _compose_with_ffmpeg(
-            scenes, images, narrations, job_dir, job_id
+        return await _compose_with_ffmpeg_if_allowed(
+            scenes, images, narrations, job_dir, job_id, f"{type(e).__name__}: {e}"
         )
     finally:
         # Clean up public assets 
-        _cleanup_public(images_dir, audio_dir)
+        _cleanup_public(images_dir, audio_dir, videos_dir)
+
+
+def _prepare_scene_video_for_remotion(src_video: Path, dst_video: Path) -> bool:
+    """Convert an MP4 scene clip into a browser-playable WebM for Remotion <Video>.
+
+    ffprobe-valid H.264 MP4 is not enough here: the bundled/headless Chrome used by
+    Remotion may lack proprietary H.264 decoding. VP8 WebM is the safer input for
+    browser-side video playback. Audio is stripped because narration is handled by
+    Remotion separately.
+    """
+    try:
+        dst_video.parent.mkdir(parents=True, exist_ok=True)
+        tmp_video = dst_video.with_suffix(".tmp.webm")
+        if tmp_video.exists():
+            tmp_video.unlink()
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(src_video),
+            "-an",
+            "-vf", "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,format=yuv420p",
+            "-r", "30",
+            "-c:v", "libvpx",
+            "-deadline", "good",
+            "-cpu-used", "5",
+            "-crf", "32",
+            "-b:v", "2500k",
+            str(tmp_video),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        if result.returncode != 0 or not tmp_video.exists() or tmp_video.stat().st_size < 1024:
+            print(f"⚠️ [Remotion] WebM conversion failed for {src_video}: {(result.stderr or '')[-500:]}")
+            if tmp_video.exists():
+                tmp_video.unlink()
+            return False
+
+        if not _is_valid_video(tmp_video):
+            print(f"⚠️ [Remotion] Converted WebM is invalid for {src_video}: {tmp_video}")
+            tmp_video.unlink(missing_ok=True)
+            return False
+
+        tmp_video.replace(dst_video)
+        print(f"✅ [Remotion] Scene video converted for browser playback: {src_video.name} -> {dst_video.name}")
+        return True
+    except Exception as exc:
+        print(f"⚠️ [Remotion] Scene video conversion exception for {src_video}: {type(exc).__name__}: {exc}")
+        with suppress(Exception):
+            tmp_video.unlink()  # type: ignore[name-defined]
+        return False
+
+
+def _is_valid_video(video_path: Path) -> bool:
+    """Return True only when ffprobe can read a finalized MP4 container."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(video_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            return False
+        return float((result.stdout or "0").strip() or 0) > 0
+    except Exception:
+        return False
 
 
 async def _reencode_for_youtube(video_path: Path) -> None:
@@ -337,13 +557,75 @@ async def _reencode_for_youtube(video_path: Path) -> None:
             temp_path.unlink()
 
 
-def _cleanup_public(images_dir: Path, audio_dir: Path):
+def _build_atempo_filter(speed_factor: float) -> str:
+    """Build a valid ffmpeg atempo chain for the requested factor."""
+    if speed_factor <= 0:
+        return "atempo=1.0"
+
+    filters: list[str] = []
+    remaining = float(speed_factor)
+
+    while remaining > 2.0:
+        filters.append("atempo=2.0")
+        remaining /= 2.0
+
+    while remaining < 0.5:
+        filters.append("atempo=0.5")
+        remaining /= 0.5
+
+    filters.append(f"atempo={remaining:.6f}")
+    return ",".join(filters)
+
+
+async def _enforce_duration_limit(video_path: Path, max_duration: float = 60.0) -> None:
+    """As a final safeguard, speed-adjust the rendered MP4 if it exceeds the limit."""
+    actual_duration = _get_audio_duration(str(video_path))
+    if actual_duration <= max_duration:
+        return
+
+    speed_factor = actual_duration / max_duration
+    temp_path = video_path.with_suffix(".capped.mp4")
+    video_filter = f"setpts=PTS/{speed_factor:.6f}"
+    audio_filter = _build_atempo_filter(speed_factor)
+    cmd = [
+        "ffmpeg", "-y", "-i", str(video_path),
+        "-filter:v", video_filter,
+        "-filter:a", audio_filter,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+        "-pix_fmt", "yuv420p",
+        "-colorspace", "bt709",
+        "-color_primaries", "bt709",
+        "-color_trc", "bt709",
+        "-color_range", "tv",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+        "-movflags", "+faststart",
+        str(temp_path),
+    ]
+    result = await asyncio.to_thread(subprocess.run, cmd, capture_output=True, text=True)
+    if result.returncode == 0 and temp_path.exists():
+        temp_path.replace(video_path)
+        final_duration = _get_audio_duration(str(video_path))
+        print(
+            f"✅ [DurationCap] Adjusted rendered video from {actual_duration:.2f}s "
+            f"to {final_duration:.2f}s using {speed_factor:.4f}x speed-up."
+        )
+    else:
+        print(f"⚠️ [DurationCap] Failed to cap duration: {result.stderr[-300:]}")
+        if temp_path.exists():
+            temp_path.unlink()
+
+
+def _cleanup_public(images_dir: Path, audio_dir: Path, videos_dir: Optional[Path] = None):
     """Clean up copied assets from Remotion public dir."""
     try:
         for f in images_dir.glob("scene_*.png"):
             f.unlink()
         for f in audio_dir.glob("narration_*.mp3"):
             f.unlink()
+        if videos_dir and videos_dir.exists():
+            for pattern in ("scene_*.mp4", "scene_*.webm"):
+                for f in videos_dir.glob(pattern):
+                    f.unlink()
         full_n = audio_dir.parent / "full_narration.mp3"
         if full_n.exists():
             full_n.unlink()
@@ -374,6 +656,30 @@ def _get_audio_duration(audio_path: str) -> float:
         return float(info["format"]["duration"])
     except Exception:
         return 5.0
+
+
+async def _compose_with_ffmpeg_if_allowed(
+    scenes: list[dict],
+    images: list[str],
+    narrations: list[dict],
+    job_dir: Path,
+    job_id: str,
+    reason: str,
+) -> str:
+    """Only use static FFmpeg fallback when explicitly enabled.
+
+    The static fallback loses Remotion title/subtitle/effects, which is worse than
+    a visible error for this app's current workflow. Keep the old fallback behind
+    an escape hatch for emergency/manual operation.
+    """
+    if os.getenv("ALLOW_STATIC_FFMPEG_FALLBACK", "false").lower() in {"1", "true", "yes", "on"}:
+        print(f"⚠️ [Fallback] ALLOW_STATIC_FFMPEG_FALLBACK enabled; using static FFmpeg fallback after: {reason}")
+        return await _compose_with_ffmpeg(scenes, images, narrations, job_dir, job_id)
+
+    raise RuntimeError(
+        "Remotion 렌더링에 실패했습니다. 정적 FFmpeg fallback은 제목/자막/효과를 잃기 때문에 비활성화했습니다. "
+        f"원인: {reason}"
+    )
 
 
 async def _compose_with_ffmpeg(
@@ -457,5 +763,7 @@ async def _compose_with_ffmpeg(
             clean_err = err_output[-1000:].strip() if len(err_output) > 1000 else err_output
             
         raise Exception(f"FFmpeg failed: {clean_err[:800]}")
+
+    await _enforce_duration_limit(output_path, max_duration=float(TARGET_DURATION))
 
     return str(output_path)

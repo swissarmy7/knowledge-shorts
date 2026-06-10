@@ -55,9 +55,9 @@ def _get_qwen_instruct(speaker: str) -> str:
     base_instruct = "Read the following text in a very natural, conversational tone. IMPORTANT: Maintain exactly the same voice, pitch, and energy level from start to finish. Do NOT change emotion based on the text. Do NOT overact. Speak cleanly and consistently. "
     
     if speaker == "Ryan":
-        return base_instruct + "Your voice is a steady, clear male voice."
+        return base_instruct + "Your voice is a steady, clear male voice with a lightly cheerful and engaging vibe."
     elif speaker == "Dylan":
-        return base_instruct + "Your voice is a steady, clear young male voice."
+        return base_instruct + "Your voice is a steady, clear young male voice with a lightly cheerful and engaging vibe."
     elif speaker == "Aiden":
         return base_instruct + "Your voice is a steady, clear little boy voice."
     elif speaker == "Serena":

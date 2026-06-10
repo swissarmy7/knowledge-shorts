@@ -1,0 +1,33 @@
+{
+  "videoTitle": {
+    "highlight": "사람이름같은반전지명",
+    "rest": "송지호해수욕장숨겨진비밀"
+  },
+  "subject": "상식",
+  "situationSetting": {},
+  "characters": [
+    {
+      "id": "narrator",
+      "name": "내레이터",
+      "description": "No visible presenter. Visual storytelling only.",
+      "voice_category": "male_young",
+      "age_group": "adult",
+      "color": "#d4ff00"
+    }
+  ],
+  "scenes": [
+    {
+      "sceneId": 1,
+      "imagePath": "images/scene_1.png",
+      "audioPath": "",
+      "script": "강원도 고성에 위치한 송지호 해수욕장을 들으면 송지호라는 사람 이름이 가장 먼저 떠오릅니다.",
+      "durationInSeconds": 2.0,
+      "motion": "slow_push",
+      "characterId": "narrator",
+      "volume": 1.0,
+      "overlays": [],
+      "videoPath": "videos/scene_1.mp4"
+    }
+  ],
+  "fullNarrationPath": null
+}

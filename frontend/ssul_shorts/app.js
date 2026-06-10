@@ -1,19 +1,12 @@
 /**
  * AI Shorts Studio - Frontend App (YouTube Layout Edition)
  */
-const APP_BASE = new URL('.', window.location.href);
+const APP_BASE = window.location.origin + '/';
 let currentJobId = null;
 let pollInterval = null;
 let currentScriptData = null; 
 let currentHistoryId = null;
 const ACTIVE_JOB_STORAGE_KEY = 'active_shorts_job_id';
-const ACTIVE_JOB_TYPE_STORAGE_KEY = 'active_shorts_job_type';
-const VIDEO_ACTIVE_STATUSES = new Set(['pending', 'generating_images', 'generating_narration', 'composing_video']);
-let currentJobType = null;
-
-function isVideoGenerationActiveStatus(status) {
-    return VIDEO_ACTIVE_STATUSES.has(status);
-}
 
 function buildAppUrl(path = '') {
     return new URL(String(path).replace(/^\/+/, ''), APP_BASE).toString();
@@ -37,15 +30,15 @@ const directionInput = document.getElementById('direction-input');
 const tagsInput = document.getElementById('tags-input');
 const generateBtn = document.getElementById('generate-btn');
 const sceneCountOptions = document.querySelectorAll('.scene-count-option');
-const visualStyleOptions = document.querySelectorAll('.visual-style-option');
-let selectedVisualStyle = 'south-park-comic';
+// const visualStyleOptions = document.querySelectorAll('.visual-style-option');
+let selectedVisualStyle = 'modern-editorial';
 let selectedVoiceGender = 'male';
 let selectedVoiceAge = 'young';
 let selectedVoiceTone = 'bright';
 let selectedVoiceSpeed = '1.12';
 
 const SPEED_CHAR_PROFILE = {
-    '1.12': 5.8,
+    '1.12': 6.0,
 };
 
 const DURATION_TARGET_PROFILE = {
@@ -66,16 +59,8 @@ const youtubeTagsInput = document.getElementById('youtube-tags-input');
 const fullAudioStatus = document.getElementById('full-audio-status');
 const voiceGenderSelect = document.getElementById('voice-gender-select');
 const confirmGenerateBtn = document.getElementById('confirm-generate-btn');
-const generateAllImagesBtn = document.getElementById('generate-all-images-btn');
 const backToInputBtn = document.getElementById('back-to-input-btn');
 const regenerateScriptBtn = document.getElementById('regenerate-script-btn');
-
-// DOM Elements - Advanced Voice Settings (Step 1 & Step 2)
-const voiceGenderToggle = document.getElementById('voice-gender-toggle');
-const voiceAgeToggle = document.getElementById('voice-age-toggle');
-const voiceToneToggle = document.getElementById('voice-tone-toggle');
-const voiceSpeedToggle = document.getElementById('voice-speed-toggle');
-const voiceSpeedSelect = document.getElementById('voice-speed-select');
 
 // DOM Elements - Progress & Result
 const progressSection = document.getElementById('progress-section');
@@ -105,10 +90,15 @@ const historyRefreshBtn = document.getElementById('history-refresh-btn');
 const logoHome = document.getElementById('logo-home');
 const menuBtn = document.querySelector('.menu-btn');
 
+// DOM Elements - Advanced Voice Settings (Step 1 & Step 2)
+const voiceGenderToggle = document.getElementById('voice-gender-toggle');
+const voiceAgeToggle = document.getElementById('voice-age-toggle');
+const voiceToneToggle = document.getElementById('voice-tone-toggle');
+const voiceSpeedToggle = document.getElementById('voice-speed-toggle');
+const voiceSpeedSelect = document.getElementById('voice-speed-select');
+
 let selectedSceneCount = 12;
 let lastMessage = "";
-let retryMode = 'video';
-let pendingAutoVideoAfterImages = false;
 
 /**
  * Navigation Helpers
@@ -124,20 +114,11 @@ function showStep(stepId) {
 }
 
 function resetUI() {
-    if (currentJobId && currentJobType === 'video') {
-        alert('영상 생성이 아직 진행 중입니다. 브라우저를 닫아도 계속 생성되며, 완료되면 보관함에 저장됩니다. 완료 전에는 새 영상을 시작할 수 없습니다.');
-        resumeActiveVideoJob(currentJobId, '진행 중인 영상 생성 작업으로 다시 연결합니다...');
-        return;
-    }
     if (currentScriptData && !confirm('진행 중인 작업이 사라집니다. 정말 처음으로 돌아갈까요?')) return;
     
     currentJobId = null;
-    currentJobType = null;
     currentScriptData = null;
     currentHistoryId = null;
-    pendingAutoVideoAfterImages = false;
-    localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
-    localStorage.removeItem(ACTIVE_JOB_TYPE_STORAGE_KEY);
     if (pollInterval) clearInterval(pollInterval);
     pollInterval = null;
     
@@ -156,10 +137,7 @@ function resetUI() {
     resultYoutubeTags.textContent = '';
     resetSteps();
     
-    selectedVisualStyle = 'south-park-comic';
-    visualStyleOptions.forEach(o => {
-        o.classList.toggle('active', o.dataset.style === 'south-park-comic');
-    });
+    selectedVisualStyle = 'modern-editorial';
     
     showStep('input-step');
     resultSection.classList.add('hidden');
@@ -173,39 +151,9 @@ function resetGenerateButton() {
     confirmGenerateBtn.textContent = '🎬 최종 영상 생성하기';
 }
 
-function getDurationTargetProfile(sceneCount, speed) {
-    const profile = DURATION_TARGET_PROFILE[sceneCount] || {
-        targetSeconds: Math.min(60, Math.max(44, sceneCount * 5)),
-        minSeconds: Math.max(40, sceneCount * 4),
-        maxSeconds: Math.min(60, Math.max(48, sceneCount * 5)),
-    };
-    const charsPerSec = SPEED_CHAR_PROFILE[speed] || SPEED_CHAR_PROFILE['1.12'];
-    const totalChars = Math.round(profile.targetSeconds * charsPerSec);
-    const sceneChars = totalChars / Math.max(sceneCount, 1);
-
-    return {
-        min_total_chars: Math.max(160, Math.round(totalChars * 0.93)),
-        max_total_chars: Math.round(totalChars * 1.05),
-        min_scene_chars: Math.max(14, Math.round(sceneChars * 0.88)),
-        max_scene_chars: Math.round(sceneChars * 1.10)
-    };
-}
-
 /**
  * Authentication
  */
-function showLoginOverlay(message = '') {
-    localStorage.removeItem('auth_token');
-    const preloadStyle = document.getElementById('auth-preload-style');
-    if (preloadStyle) preloadStyle.remove();
-    if (appContainer) appContainer.classList.add('hidden');
-    if (loginOverlay) loginOverlay.classList.remove('hidden');
-    if (message && loginError) {
-        loginError.textContent = message;
-        loginError.classList.remove('hidden');
-    }
-}
-
 async function handleLogin() {
     const password = loginPassword.value;
     if (!password) return;
@@ -234,8 +182,12 @@ async function handleLogin() {
 
 async function checkAuth() {
     const token = localStorage.getItem('auth_token');
+    const preloadStyle = document.getElementById('auth-preload-style');
+    
     if (!token) {
-        showLoginOverlay();
+        if (preloadStyle) preloadStyle.remove();
+        loginOverlay.classList.remove('hidden');
+        appContainer.classList.add('hidden');
         return;
     }
     try {
@@ -243,117 +195,49 @@ async function checkAuth() {
             headers: { 'Authorization': `Bearer ${token}` }
         });
         if (response.ok) {
-            const preloadStyle = document.getElementById('auth-preload-style');
             if (preloadStyle) preloadStyle.remove();
             loginOverlay.classList.add('hidden');
             appContainer.classList.remove('hidden');
             initializeAfterAuth();
         } else {
-            showLoginOverlay('로그인이 만료되었습니다. 다시 로그인해주세요.');
+            localStorage.removeItem('auth_token');
+            if (preloadStyle) preloadStyle.remove();
+            loginOverlay.classList.remove('hidden');
+            appContainer.classList.add('hidden');
         }
     } catch (e) {
-        showLoginOverlay('서버 연결 오류. 잠시 후 다시 시도해주세요.');
+        if (preloadStyle) preloadStyle.remove();
+        loginOverlay.classList.remove('hidden');
+        appContainer.classList.add('hidden');
     }
 }
 
 async function initializeAfterAuth() {
     await loadHistory();
-    const resumedLocalJob = resumeActiveJobIfAny();
-    if (!resumedLocalJob) {
-        await resumeServerActiveVideoJobIfAny();
-    }
 }
 
-function rememberActiveJob(jobId, jobType) {
-    currentJobId = jobId;
-    currentJobType = jobType;
-    localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, jobId);
-    localStorage.setItem(ACTIVE_JOB_TYPE_STORAGE_KEY, jobType);
-}
+function getDurationTargetProfile(sceneCount, speed) {
+    const profile = DURATION_TARGET_PROFILE[sceneCount] || {
+        targetSeconds: Math.min(60, Math.max(44, sceneCount * 5)),
+        minSeconds: Math.max(40, sceneCount * 4),
+        maxSeconds: Math.min(60, Math.max(48, sceneCount * 5)),
+    };
+    const charsPerSec = SPEED_CHAR_PROFILE[speed] || SPEED_CHAR_PROFILE['1.12'];
+    const totalChars = Math.round(profile.targetSeconds * charsPerSec);
+    const sceneChars = totalChars / Math.max(sceneCount, 1);
 
-function forgetActiveJob() {
-    localStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
-    localStorage.removeItem(ACTIVE_JOB_TYPE_STORAGE_KEY);
-    currentJobType = null;
-}
-
-function startStatusPolling() {
-    pollStatus();
-    if (pollInterval) clearInterval(pollInterval);
-    pollInterval = setInterval(pollStatus, 2000);
-}
-
-function resumeActiveVideoJob(jobId, message = '진행 중인 영상 생성 작업을 다시 연결하는 중...') {
-    rememberActiveJob(jobId, 'video');
-    showStep('workspace-step');
-    resultSection.classList.add('hidden');
-    errorSection.classList.add('hidden');
-    progressSection.classList.remove('hidden');
-    confirmGenerateBtn.disabled = true;
-    confirmGenerateBtn.textContent = '다른 영상 생성 중...';
-    if (progressMessage) progressMessage.textContent = message;
-    startStatusPolling();
-}
-
-function resumeActiveJobIfAny() {
-    const savedJobId = localStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
-    if (!savedJobId || currentJobId) return false;
-    const savedJobType = localStorage.getItem(ACTIVE_JOB_TYPE_STORAGE_KEY) || null;
-    if (savedJobType === 'video') {
-        resumeActiveVideoJob(savedJobId);
-        return true;
-    }
-    currentJobId = savedJobId;
-    currentJobType = savedJobType || 'script';
-    showStep('workspace-step');
-    resultSection.classList.add('hidden');
-    errorSection.classList.add('hidden');
-    progressSection.classList.remove('hidden');
-    if (progressMessage) progressMessage.textContent = '이전 진행 중 작업을 다시 연결하는 중...';
-    startStatusPolling();
-    return true;
-}
-
-async function getServerActiveVideoJob() {
-    const response = await fetchWithAuth(buildAppUrl('api/active-video-job'));
-    if (!response.ok) return null;
-    const data = await parseJson(response);
-    return data && data.active ? data : null;
-}
-
-async function resumeServerActiveVideoJobIfAny() {
-    try {
-        const active = await getServerActiveVideoJob();
-        if (!active || !active.job_id) return false;
-        resumeActiveVideoJob(active.job_id, active.message || '서버에서 진행 중인 영상 생성 작업을 찾았습니다. 다시 연결합니다...');
-        return true;
-    } catch (e) {
-        console.warn('Active video job lookup failed:', e);
-        return false;
-    }
-}
-
-async function ensureNoActiveVideoBeforeNewWork() {
-    if (currentJobId && currentJobType === 'video') {
-        alert('이미 영상 생성이 진행 중입니다. 완료되면 자동으로 보관함에 저장됩니다. 완료 전에는 새 영상을 생성할 수 없습니다.');
-        resumeActiveVideoJob(currentJobId);
-        return false;
-    }
-    const active = await getServerActiveVideoJob();
-    if (active && active.job_id) {
-        alert('이미 영상 생성이 진행 중입니다. 완료되면 자동으로 보관함에 저장됩니다. 완료 전에는 새 영상을 생성할 수 없습니다.');
-        resumeActiveVideoJob(active.job_id, active.message || '진행 중인 영상 생성 작업으로 다시 연결합니다...');
-        return false;
-    }
-    return true;
+    return {
+        min_total_chars: Math.max(160, Math.round(totalChars * 0.94)),
+        max_total_chars: Math.round(totalChars * 1.04),
+        min_scene_chars: Math.max(14, Math.round(sceneChars * 0.88)),
+        max_scene_chars: Math.round(sceneChars * 1.08)
+    };
 }
 
 /**
  * Script Generation (Step 1 -> Step 2 transition)
  */
 async function startScriptGeneration() {
-    if (!(await ensureNoActiveVideoBeforeNewWork())) return;
-
     const topic = topicInput.value.trim();
     if (!topic) {
         topicInput.focus();
@@ -361,7 +245,6 @@ async function startScriptGeneration() {
     }
 
     currentJobId = null;
-    currentJobType = null;
     if (pollInterval) clearInterval(pollInterval);
     pollInterval = null;
     resetSteps();
@@ -372,6 +255,19 @@ async function startScriptGeneration() {
     generateBtn.disabled = true;
     generateBtn.textContent = '기획 중...';
 
+    // Tone & Mood prompt enrichment for the script generator AI
+    let tonePrompt = "";
+    if (selectedVoiceTone === 'bright') {
+        tonePrompt = " [톤앤매너 의도: 매우 밝고 유쾌하며 통통 튀고 웃음기 가득한 재미있는 썰 말투로 대본을 구성해주세요.]";
+    } else if (selectedVoiceTone === 'calm') {
+        tonePrompt = " [톤앤매너 의도: 차분하고 진지하며 지적이고 깊은 몰입감을 주는 다큐멘터리식 썰 말투로 대본을 구성해주세요.]";
+    } else if (selectedVoiceTone === 'dark') {
+        tonePrompt = " [톤앤매너 의도: 어둡고 미스터리하며 등골이 오싹하고 긴장감 넘치는 공포/미스터리 썰 말투로 대본을 구성해주세요.]";
+    } else if (selectedVoiceTone === 'sad') {
+        tonePrompt = " [톤앤매너 의도: 슬프고 아련하며 마음 깊이 감동을 주고 눈물샘을 자극하는 감동/슬픈 썰 말투로 대본을 구성해주세요.]";
+    }
+    const enrichedDirection = directionInput.value.trim() + tonePrompt;
+
     try {
         const response = await fetchWithAuth(buildAppUrl('api/generate-script'), {
             method: 'POST',
@@ -379,8 +275,8 @@ async function startScriptGeneration() {
             body: JSON.stringify({
                 topic,
                 tags: tagsInput.value.split(','),
-                direction: directionInput.value,
-                style: 'star-instructor',
+                direction: enrichedDirection,
+                style: 'ssul-shorts',
                 scene_count: selectedSceneCount,
                 visual_style: selectedVisualStyle,
                 voice_gender: selectedVoiceGender === 'male' ? '남성' : '여성',
@@ -393,64 +289,15 @@ async function startScriptGeneration() {
         const data = await parseJson(response);
         if (data.error) throw new Error(data.error);
 
-        if (data.script_data) {
-            currentScriptData = markImagesNotReady(clearSceneGeneratedImages(data.script_data));
-            showStep('workspace-step');
-            showScriptPreview(currentScriptData);
-            generateBtn.disabled = false;
-            generateBtn.textContent = '다음 단계로 ➜';
-            return;
-        }
-
-        if (!data.job_id) throw new Error('대본 작업을 시작하지 못했습니다.');
-        rememberActiveJob(data.job_id, 'script');
-        progressMessage.textContent = 'codex로 대본 생성 중... 잠시만 기다려주세요.';
-        pollScriptStatus();
-        pollInterval = setInterval(pollScriptStatus, 2000);
+        currentScriptData = data.script_data;
+        applyVoiceDefaults(); // 자동으로 첫 페이지 목소리 설정을 반영
+        showStep('workspace-step');
+        showScriptPreview(currentScriptData);
     } catch (err) {
         alert('스크립트 생성 실패: ' + err.message);
+    } finally {
         generateBtn.disabled = false;
         generateBtn.textContent = '다음 단계로 ➜';
-    }
-}
-
-async function pollScriptStatus() {
-    if (!currentJobId) return;
-    try {
-        const response = await fetchWithAuth(buildAppUrl(`api/status/${encodeURIComponent(currentJobId)}`));
-        if (!response.ok) return;
-        const data = await parseJson(response);
-        updateProgress(data);
-
-        if (data.status === 'script_ready') {
-            if (pollInterval) clearInterval(pollInterval);
-            pollInterval = null;
-            forgetActiveJob();
-            currentScriptData = markImagesNotReady(clearSceneGeneratedImages(data.script_data));
-            currentJobId = null;
-            generateBtn.disabled = false;
-            generateBtn.textContent = '다음 단계로 ➜';
-            showStep('workspace-step');
-            showScriptPreview(currentScriptData);
-        } else if (data.status === 'error') {
-            if (pollInterval) clearInterval(pollInterval);
-            pollInterval = null;
-            forgetActiveJob();
-            currentJobId = null;
-            generateBtn.disabled = false;
-            generateBtn.textContent = '다음 단계로 ➜';
-            alert(data.message || '스크립트 생성 실패');
-        } else if (data.status === 'not_found') {
-            if (pollInterval) clearInterval(pollInterval);
-            pollInterval = null;
-            forgetActiveJob();
-            currentJobId = null;
-            generateBtn.disabled = false;
-            generateBtn.textContent = '다음 단계로 ➜';
-            alert('스크립트 작업을 찾을 수 없습니다. 다시 시도해주세요.');
-        }
-    } catch (err) {
-        console.error('Script polling error:', err);
     }
 }
 
@@ -468,45 +315,9 @@ async function regenerateScript() {
 /**
  * Editor Rendering
  */
-function applyVoiceDefaults() {
-    if (!currentScriptData) return;
-    const savedSpeed = String((currentScriptData.tts_settings || {}).speed || selectedVoiceSpeed || '1.12');
-
-    
-    let optimalKey = 'male_young';
-    if (selectedVoiceGender === 'male') {
-        if (selectedVoiceAge === 'middle') optimalKey = 'male_warm';
-        else optimalKey = 'male_young';
-    } else {
-        if (selectedVoiceAge === 'middle') optimalKey = 'female_calm';
-        else optimalKey = 'female_young';
-    }
-    
-    if (voiceGenderSelect) {
-        voiceGenderSelect.value = optimalKey;
-    }
-    if (voiceSpeedSelect) {
-        voiceSpeedSelect.value = savedSpeed;
-    }
-    
-    if (!currentScriptData.tts_settings) {
-        currentScriptData.tts_settings = {};
-    }
-    currentScriptData.tts_settings.speed = savedSpeed;
-    selectedVoiceSpeed = savedSpeed;
-    
-    const narrator = (currentScriptData.characters || []).find(c => c.id === 'narrator');
-    if (narrator) {
-        narrator.voice_category = optimalKey;
-        narrator.age_group = selectedVoiceAge === 'young' ? 'adult' : 'middle-aged';
-    }
-}
-
 function showScriptPreview(scriptData) {
     if (!scriptData) return;
     resetGenerateButton();
-    
-    applyVoiceDefaults();
     
     // Populate Title Card
     if (typeof scriptData.video_title === 'object') {
@@ -527,13 +338,27 @@ function showScriptPreview(scriptData) {
     // Populate Voice Selection
     const narrator = (scriptData.characters || []).find(c => c.id === 'narrator');
     if (narrator && voiceGenderSelect) {
-        voiceGenderSelect.value = narrator.voice_category || 'male_young';
+        const cat = (narrator.voice_category || '').toUpperCase();
+        // If it's a direct style override (M1~M5, F1~F5)
+        if (['M1', 'M2', 'M3', 'M4', 'M5', 'F1', 'F2', 'F3', 'F4', 'F5'].includes(cat)) {
+            voiceGenderSelect.value = cat;
+        } else {
+            // Backward compatibility fallback mapping
+            const age = (narrator.age_group || '').toLowerCase();
+            if (cat.toLowerCase().includes('female')) {
+                voiceGenderSelect.value = (age === 'middle-aged' || age === 'elder') ? 'F1' : 'F2';
+            } else {
+                voiceGenderSelect.value = (age === 'middle-aged' || age === 'elder') ? 'M1' : 'M2';
+            }
+        }
     }
 
-    // Populate Voice Speed
+    // Populate Speech Speed Selection
     if (voiceSpeedSelect) {
-        voiceSpeedSelect.value = (scriptData.tts_settings || {}).speed || selectedVoiceSpeed || '1.12';
+        const savedSpeed = (scriptData.tts_settings || {}).speed || '1.12';
+        voiceSpeedSelect.value = savedSpeed;
     }
+
 
 
     // Render Scenes
@@ -618,142 +443,14 @@ function updateScriptStats() {
 }
 
 /**
- * Scene image preparation
- */
-function sceneHasImage(scene) {
-    if (!scene) return false;
-    if (scene.image_path || scene.generated_image_path || scene.asset_path) return true;
-    return (scene.overlays || []).some((ov) => ov && ov.type === 'image' && ov.content);
-}
-
-function clearSceneGeneratedImages(scriptData) {
-    if (!scriptData || !Array.isArray(scriptData.scenes)) return scriptData;
-    delete scriptData.image_job_id;
-    delete scriptData.images_ready_for_final;
-    scriptData.scenes.forEach((scene) => {
-        if (!scene) return;
-        delete scene.image_path;
-        delete scene.generated_image_path;
-        delete scene.asset_path;
-        scene.overlays = (scene.overlays || []).filter((ov) => !(ov && ov.type === 'image'));
-    });
-    return scriptData;
-}
-
-function markImagesNotReady(scriptData) {
-    if (!scriptData) return scriptData;
-    scriptData.images_ready_for_final = false;
-    delete scriptData.image_job_id;
-    return scriptData;
-}
-
-async function generateAllSceneImages(options = {}) {
-    const forceNew = !!options.forceNew;
-    const autoContinueToVideo = !!options.autoContinueToVideo;
-    if (!currentScriptData || !Array.isArray(currentScriptData.scenes)) return;
-    if (forceNew) {
-        currentScriptData = clearSceneGeneratedImages(currentScriptData);
-        showScriptPreview(currentScriptData);
-    }
-    if (currentJobId) {
-        alert('이미 진행 중인 작업이 있습니다. 잠시만 기다려주세요.');
-        return;
-    }
-
-    const missingIndexes = forceNew
-        ? currentScriptData.scenes.map((_, idx) => idx)
-        : currentScriptData.scenes
-            .map((scene, idx) => sceneHasImage(scene) ? -1 : idx)
-            .filter((idx) => idx >= 0);
-
-    if (missingIndexes.length === 0) {
-        if (autoContinueToVideo) {
-            pendingAutoVideoAfterImages = false;
-            await startVideoGeneration({ skipImageStage: true });
-            return;
-        }
-        alert('이미 모든 장면 이미지가 준비되어 있습니다.');
-        return;
-    }
-
-    if (pollInterval) clearInterval(pollInterval);
-    pollInterval = null;
-    errorSection.classList.add('hidden');
-    resultSection.classList.add('hidden');
-    progressSection.classList.remove('hidden');
-    resetSteps();
-    if (generateAllImagesBtn) {
-        generateAllImagesBtn.disabled = true;
-        generateAllImagesBtn.textContent = '🎨 이미지 생성 작업 요청 중...';
-    }
-    confirmGenerateBtn.disabled = true;
-
-    try {
-        const response = await fetchWithAuth(buildAppUrl('api/generate-scene-images'), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ script_data: currentScriptData, force_new: forceNew }),
-        });
-        const data = await parseJson(response);
-        if (data.error || !data.job_id) throw new Error(data.error || '이미지 생성 작업을 시작하지 못했습니다.');
-        rememberActiveJob(data.job_id, 'images');
-        pendingAutoVideoAfterImages = autoContinueToVideo;
-        currentJobType = 'images';
-        startStatusPolling();
-    } catch (err) {
-        pendingAutoVideoAfterImages = false;
-        if (generateAllImagesBtn) {
-            generateAllImagesBtn.disabled = false;
-            generateAllImagesBtn.textContent = '🎨 부족한 장면 이미지 생성';
-        }
-        resetGenerateButton();
-        showError(err.message, 'images');
-    }
-}
-
-/**
- * Image-only generation
- */
-async function startImageOnlyGeneration() {
-    if (!currentScriptData) return;
-    progressSection.classList.remove('hidden');
-    errorSection.classList.add('hidden');
-    resetSteps();
-    if (progressMessage) {
-        progressMessage.textContent = '🎨 새 장면 이미지를 처음부터 생성합니다...';
-    }
-    await generateAllSceneImages({ forceNew: true, autoContinueToVideo: false });
-}
-
-/**
  * Final Video Generation
  */
-async function startVideoGeneration(options = {}) {
-    const skipImageStage = !!options.skipImageStage;
+async function startVideoGeneration() {
     if (!currentScriptData) return;
-    const imagesReadyForFinal = currentScriptData.images_ready_for_final === true;
-    const missingImages = (currentScriptData.scenes || [])
-        .map((scene, idx) => sceneHasImage(scene) ? -1 : idx + 1)
-        .filter((idx) => idx > 0);
-    if (!skipImageStage && (!imagesReadyForFinal || missingImages.length > 0)) {
-        // A fresh final-video attempt always starts its image stage from a clean
-        // slate. This prevents stale image paths/logs from a previous job from
-        // leaking into the new render.
-        progressSection.classList.remove('hidden');
-        errorSection.classList.add('hidden');
-        resetSteps();
-        if (progressMessage) {
-            progressMessage.textContent = '🎨 새 최종 영상용 장면 이미지를 처음부터 생성합니다...';
-        }
-        await generateAllSceneImages({ forceNew: true, autoContinueToVideo: true });
-        return;
-    }
-    if (!(await ensureNoActiveVideoBeforeNewWork())) return;
 
     if (pollInterval) clearInterval(pollInterval);
     pollInterval = null;
     currentJobId = null;
-    currentJobType = null;
 
     confirmGenerateBtn.disabled = true;
     confirmGenerateBtn.textContent = '영상 제작 요청 중...';
@@ -771,20 +468,12 @@ async function startVideoGeneration(options = {}) {
         });
         const data = await parseJson(response);
         if (data.error || !data.job_id) {
-            if (data.active_job && data.active_job.job_id) {
-                alert(data.error || '이미 다른 영상 생성이 진행 중입니다.');
-                resumeActiveVideoJob(data.active_job.job_id, data.active_job.message || '진행 중인 영상 생성 작업으로 다시 연결합니다...');
-                return;
-            }
-            if (data.missing_images && data.missing_images.length) {
-                showError(`${data.error || '장면 이미지가 아직 없습니다.'} 누락 장면: ${data.missing_images.join(', ')}`, 'images');
-                return;
-            }
             throw new Error(data.error || '영상 작업을 시작하지 못했습니다.');
         }
-        rememberActiveJob(data.job_id, 'video');
+        currentJobId = data.job_id;
         
-        startStatusPolling();
+        pollStatus();
+        pollInterval = setInterval(pollStatus, 2000);
     } catch (err) {
         showError(err.message);
     }
@@ -799,75 +488,16 @@ async function pollStatus() {
         const response = await fetchWithAuth(buildAppUrl(`api/status/${encodeURIComponent(currentJobId)}`));
         if (!response.ok) return;
         const data = await parseJson(response);
-        if (data.status === 'not_found') {
-            forgetActiveJob();
-            clearInterval(pollInterval);
-            pollInterval = null;
-            currentJobId = null;
-            await loadHistory();
-            showStep('history-section');
-            return;
-        }
-        if (data.script_data) {
-            currentScriptData = data.script_data;
-        }
         updateProgress(data);
-        if (data.status === 'script_ready') {
-            forgetActiveJob();
+        if (data.status === 'completed') {
             clearInterval(pollInterval);
             pollInterval = null;
-            currentScriptData = markImagesNotReady(clearSceneGeneratedImages(data.script_data));
-            currentJobId = null;
-            generateBtn.disabled = false;
-            generateBtn.textContent = '다음 단계로 ➜';
-            showStep('workspace-step');
-            showScriptPreview(currentScriptData);
-        } else if (data.status === 'completed') {
-            if (data.script_data) currentScriptData = data.script_data;
-            const completedJobType = data.job_type || currentJobType;
-            forgetActiveJob();
-            clearInterval(pollInterval);
-            pollInterval = null;
-            currentJobId = null;
-            currentJobType = null;
-            if (completedJobType === 'images') {
-                const shouldAutoContinue = pendingAutoVideoAfterImages;
-                pendingAutoVideoAfterImages = false;
-                showScriptPreview(currentScriptData);
-                progressSection.classList.remove('hidden');
-                errorSection.classList.add('hidden');
-                if (progressFill) progressFill.style.width = '100%';
-                if (progressPercent) progressPercent.textContent = '100%';
-                if (generateAllImagesBtn) {
-                    generateAllImagesBtn.disabled = false;
-                    generateAllImagesBtn.textContent = '🎨 부족한 장면 이미지 생성';
-                }
-                if (shouldAutoContinue) {
-                    if (progressMessage) progressMessage.textContent = '✅ 이미지 생성 완료. 최종 영상 생성을 시작합니다...';
-                    await startVideoGeneration({ skipImageStage: true });
-                } else {
-                    if (progressMessage) progressMessage.textContent = data.message || '✅ 전체 장면 이미지 준비 완료!';
-                    resetGenerateButton();
-                }
-            } else {
-                showResult(data);
-                loadHistory();
-            }
+            showResult(data);
+            loadHistory();
         } else if (data.status === 'error') {
-            pendingAutoVideoAfterImages = false;
-            const failedJobType = data.job_type || currentJobType;
-            forgetActiveJob();
             clearInterval(pollInterval);
             pollInterval = null;
-            currentJobId = null;
-            currentJobType = null;
-            showScriptPreview(currentScriptData);
-            if (generateAllImagesBtn) {
-                generateAllImagesBtn.disabled = false;
-                generateAllImagesBtn.textContent = '🎨 부족한 장면 이미지 생성';
-            }
-            resetGenerateButton();
-            showError(data.message, failedJobType === 'images' ? 'images' : 'video');
+            showError(data.message);
         }
     } catch (e) {
         console.error('Polling error:', e);
@@ -917,15 +547,11 @@ function showResult(data) {
     }
 }
 
-function showError(msg, mode = 'video') {
-    retryMode = mode;
+function showError(msg) {
     resetGenerateButton();
     progressSection.classList.add('hidden');
     errorSection.classList.remove('hidden');
     errorMessage.textContent = msg;
-    if (retryBtn) {
-        retryBtn.textContent = mode === 'images' ? '🎨 전체 장면 이미지 생성' : '다시 시도';
-    }
 }
 
 function resetSteps() {
@@ -997,21 +623,70 @@ window.handleVoiceChange = () => {
     if (!narrator) return;
     
     const val = voiceGenderSelect.value;
-    if (val === 'male_warm') {
-        narrator.voice_category = 'male';
-        narrator.age_group = 'middle-aged';
-    } else if (val === 'male_young') {
-        narrator.voice_category = 'male';
-        narrator.age_group = 'young-adult';
-    } else if (val === 'female_calm') {
-        narrator.voice_category = 'female';
-        narrator.age_group = 'middle-aged';
-    } else if (val === 'female_young') {
-        narrator.voice_category = 'female';
-        narrator.age_group = 'young-adult';
-    }
-    console.log('[VoiceChange] Narrator voice updated to:', narrator.voice_category, narrator.age_group);
+    narrator.voice_category = val; // Direct Supertonic Key (M1~M5, F1~F5)
+    console.log('[VoiceChange] Narrator voice style override updated to:', val);
 };
+
+window.handleVoiceSpeedChange = () => {
+    if (!currentScriptData) return;
+    if (!currentScriptData.tts_settings) {
+        currentScriptData.tts_settings = {};
+    }
+    const val = voiceSpeedSelect.value;
+    currentScriptData.tts_settings.speed = val;
+    selectedVoiceSpeed = val;
+    const sceneCount = currentScriptData.scenes.length || 12;
+    currentScriptData.duration_target = getDurationTargetProfile(sceneCount, val);
+    console.log('[VoiceSpeedChange] Narrator speech speed updated to:', val);
+    updateScriptStats();
+};
+
+function applyVoiceDefaults() {
+    if (!currentScriptData) return;
+    const savedSpeed = String((currentScriptData.tts_settings || {}).speed || selectedVoiceSpeed || '1.12');
+    
+    // 1. 최적의 목소리 매핑
+    let optimalKey = 'M2'; // default
+    if (selectedVoiceGender === 'male') {
+        if (selectedVoiceAge === 'child') optimalKey = 'M5';
+        else if (selectedVoiceAge === 'middle') optimalKey = 'M1';
+        else { // young
+            if (selectedVoiceTone === 'dark') optimalKey = 'M4';
+            else if (selectedVoiceTone === 'calm') optimalKey = 'M3';
+            else optimalKey = 'M2';
+        }
+    } else {
+        if (selectedVoiceAge === 'child') optimalKey = 'F5';
+        else if (selectedVoiceAge === 'middle') optimalKey = 'F1';
+        else { // young
+            if (selectedVoiceTone === 'dark') optimalKey = 'F3';
+            else if (selectedVoiceTone === 'calm') optimalKey = 'F1';
+            else optimalKey = 'F2';
+        }
+    }
+    
+    // 2. Step 2 DOM 엘리먼트 셋팅
+    if (voiceGenderSelect) {
+        voiceGenderSelect.value = optimalKey;
+    }
+    if (voiceSpeedSelect) {
+        voiceSpeedSelect.value = savedSpeed;
+    }
+    
+    // 3. currentScriptData 데이터 모델에 동기화
+    if (!currentScriptData.tts_settings) {
+        currentScriptData.tts_settings = {};
+    }
+    currentScriptData.tts_settings.speed = savedSpeed;
+    selectedVoiceSpeed = savedSpeed;
+    
+    // narrator 캐릭터 정보 갱신
+    const narrator = (currentScriptData.characters || []).find(c => c.id === 'narrator');
+    if (narrator) {
+        narrator.voice_category = optimalKey;
+        console.log('[VoiceDefault] Narrator optimal voice key set to:', optimalKey);
+    }
+}
 window.copyFullScript = () => {
     if (!currentScriptData) return;
     const text = currentScriptData.scenes.map(s => `[내레이션] ${s.script}`).join('\n\n');
@@ -1059,8 +734,6 @@ async function handleFileUpload(event, idx) {
 function updateSceneOverlay(idx, path) {
     if(!currentScriptData.scenes[idx].overlays) currentScriptData.scenes[idx].overlays = [];
     currentScriptData.scenes[idx].overlays = [{ type: 'image', content: path, position: 'blackboard', startTime: 0, duration: 5 }];
-    currentScriptData.scenes[idx].image_path = path;
-    currentScriptData.scenes[idx].generated_image_path = path;
     showScriptPreview(currentScriptData);
 }
 
@@ -1169,7 +842,7 @@ async function handleAiImageGenerate(idx) {
             body: JSON.stringify({
                 prompt: imagePrompt,
                 scene_script: currentScriptData.scenes[idx].script,
-                visual_style: currentScriptData.visual_style || 'south-park-comic'
+                visual_style: currentScriptData.visual_style || 'cute-2d'
             })
         });
         const data = await parseJson(res);
@@ -1184,26 +857,16 @@ async function handleAiImageGenerate(idx) {
  */
 loginBtn.addEventListener('click', handleLogin);
 loginPassword.addEventListener('keydown', (e) => { if(e.key === 'Enter') handleLogin(); });
-navCreateBtn.addEventListener('click', async () => {
-    if (!(await ensureNoActiveVideoBeforeNewWork())) return;
-    showStep('input-step');
-});
+navCreateBtn.addEventListener('click', () => showStep('input-step'));
 navHistoryBtn.addEventListener('click', () => { showStep('history-section'); loadHistory(); });
 historyRefreshBtn.addEventListener('click', loadHistory);
 logoHome.addEventListener('click', resetUI);
 generateBtn.addEventListener('click', startScriptGeneration);
-if (generateAllImagesBtn) generateAllImagesBtn.addEventListener('click', generateAllSceneImages);
 backToInputBtn.addEventListener('click', () => showStep('input-step'));
 regenerateScriptBtn.addEventListener('click', regenerateScript);
 confirmGenerateBtn.addEventListener('click', startVideoGeneration);
 newVideoBtn.addEventListener('click', resetUI);
-retryBtn.addEventListener('click', () => {
-    if (retryMode === 'images') {
-        generateAllSceneImages();
-    } else {
-        startVideoGeneration();
-    }
-});
+retryBtn.addEventListener('click', startVideoGeneration);
 copyMetaBtn.addEventListener('click', async () => {
     if (!currentScriptData) return;
     const text = [
@@ -1228,24 +891,6 @@ document.addEventListener('click', (e) => {
     }
 });
 
-function handleVoiceSpeedChange() {
-    const speedSelect = document.getElementById('voice-speed-select');
-    if (!speedSelect || !currentScriptData) return;
-    if (!currentScriptData.tts_settings) {
-        currentScriptData.tts_settings = {};
-    }
-    const speed = speedSelect.value;
-    currentScriptData.tts_settings.speed = speed;
-    selectedVoiceSpeed = speed;
-
-    // Dynamically adjust duration_target in frontend!
-    const sceneCount = currentScriptData.scenes.length || 12;
-    currentScriptData.duration_target = getDurationTargetProfile(sceneCount, speed);
-
-    updateScriptStats();
-}
-window.handleVoiceSpeedChange = handleVoiceSpeedChange;
-
 sceneCountOptions.forEach(opt => {
     opt.onclick = () => {
         sceneCountOptions.forEach(o => o.classList.remove('active'));
@@ -1255,14 +900,7 @@ sceneCountOptions.forEach(opt => {
     };
 });
 
-visualStyleOptions.forEach(opt => {
-    opt.onclick = () => {
-        visualStyleOptions.forEach(o => o.classList.remove('active'));
-        opt.classList.add('active');
-        selectedVisualStyle = opt.dataset.style;
-        console.log('Selected visual style:', selectedVisualStyle);
-    };
-});
+
 
 // Step 1 Voice Gender 토글 바인딩
 if (voiceGenderToggle) {
@@ -1305,7 +943,8 @@ if (voiceToneToggle) {
 
 
 
-window.onload = checkAuth;
+// 즉시 인증 체크 실행 (window.onload 대기 없이 초고속 로드)
+checkAuth();
 window.openHistoryItem = openHistoryItem;
 window.deleteHistoryItem = deleteHistoryItem;
 window.copyHistoryMeta = copyHistoryMeta;
@@ -1313,3 +952,4 @@ window.handleAiImageGenerate = handleAiImageGenerate;
 window.handleFileUpload = handleFileUpload;
 window.handleFullAudioUpload = handleFullAudioUpload;
 window.removeFullAudio = removeFullAudio;
+window.handleVoiceSpeedChange = handleVoiceSpeedChange;

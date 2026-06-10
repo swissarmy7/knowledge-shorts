@@ -1,0 +1,109 @@
+{
+  "videoTitle": {
+    "highlight": "사람이름같은반전지명",
+    "rest": "송지호해수욕장숨겨진비밀"
+  },
+  "subject": "상식",
+  "situationSetting": {},
+  "characters": [
+    {
+      "id": "narrator",
+      "name": "내레이터",
+      "description": "No visible presenter. Visual storytelling only.",
+      "voice_category": "male_young",
+      "age_group": "adult",
+      "color": "#d4ff00"
+    }
+  ],
+  "scenes": [
+    {
+      "sceneId": 1,
+      "imagePath": "images/scene_1.png",
+      "audioPath": "",
+      "script": "강원도 고성에 위치한 송지호 해수욕장을 들으면 송지호라는 사람 이름이 가장 먼저 떠오릅니다.",
+      "durationInSeconds": 7.1579999999999995,
+      "motion": "slow_push",
+      "characterId": "narrator",
+      "volume": 1.0,
+      "overlays": []
+    },
+    {
+      "sceneId": 2,
+      "imagePath": "images/scene_2.png",
+      "audioPath": "",
+      "script": "혹시 내 주변에 있는 지석이나 지호처럼 실제 친구의 이름이 떠올라 친근하게 느껴지기도 합니다.",
+      "durationInSeconds": 7.35,
+      "motion": "slow_push",
+      "characterId": "narrator",
+      "volume": 1.0,
+      "overlays": []
+    },
+    {
+      "sceneId": 3,
+      "imagePath": "images/scene_3.png",
+      "audioPath": "",
+      "script": "하지만 여기에는 우리가 전혀 예상하지 못했던 재미있는 반전과 진짜 이름의 비밀이 있습니다.",
+      "durationInSeconds": 6.869999999999999,
+      "motion": "slow_push",
+      "characterId": "narrator",
+      "volume": 1.0,
+      "overlays": []
+    },
+    {
+      "sceneId": 4,
+      "imagePath": "images/scene_4.png",
+      "audioPath": "",
+      "script": "송지호의 호는 호수를 뜻하는 한자이며 소나무와 연못이 아름다운 호수라는 의미를 담고 있습니다.",
+      "durationInSeconds": 7.2299999999999995,
+      "motion": "slow_push",
+      "characterId": "narrator",
+      "volume": 1.0,
+      "overlays": []
+    },
+    {
+      "sceneId": 5,
+      "imagePath": "images/scene_5.png",
+      "audioPath": "",
+      "script": "반대로 그냥 평범한 행정 구역 이름인 줄 알았는데 위인의 이름에서 따온 장소들도 많습니다.",
+      "durationInSeconds": 7.085999999999999,
+      "motion": "slow_push",
+      "characterId": "narrator",
+      "volume": 1.0,
+      "overlays": []
+    },
+    {
+      "sceneId": 6,
+      "imagePath": "images/scene_6.png",
+      "audioPath": "",
+      "script": "우리가 자주 걷는 서울의 을지로나 퇴계로는 각각 을지문덕 장군과 퇴계 이황의 이름에서 왔습니다.",
+      "durationInSeconds": 7.566,
+      "motion": "slow_push",
+      "characterId": "narrator",
+      "volume": 1.0,
+      "overlays": []
+    },
+    {
+      "sceneId": 7,
+      "imagePath": "images/scene_7.png",
+      "audioPath": "",
+      "script": "이처럼 익숙하게 불렀던 장소들의 진짜 유래를 알고 나면 세상을 보는 눈이 한층 더 넓어집니다.",
+      "durationInSeconds": 7.35,
+      "motion": "slow_push",
+      "characterId": "narrator",
+      "volume": 1.0,
+      "overlays": []
+    },
+    {
+      "sceneId": 8,
+      "imagePath": "images/scene_8.png",
+      "audioPath": "",
+      "script": "혹시 여러분이 알고 계시는 또 다른 재미있는 이름의 지명이 있다면 댓글로 알려주세요.",
+      "durationInSeconds": 6.29,
+      "motion": "slow_push",
+      "characterId": "narrator",
+      "volume": 1.0,
+      "overlays": []
+    }
+  ],
+  "fullNarrationPath": "full_narration.mp3"
+}

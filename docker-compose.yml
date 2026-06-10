@@ -15,7 +15,9 @@ services:
       - ./frontend:/app/frontend
       - ./systems:/app/systems
       - ./video-engine/src:/app/video-engine/src
+    shm_size: '2gb'
     restart: always
     environment:
-      - REMOTION_CONCURRENCY=4
+      - REMOTION_CONCURRENCY=2
+      - REMOTION_GL=swangle
       - NODE_ENV=production

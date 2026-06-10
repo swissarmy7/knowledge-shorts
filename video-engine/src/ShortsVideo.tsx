@@ -3,6 +3,7 @@ import {
     AbsoluteFill,
     Audio,
     Img,
+    Video,
     Sequence,
     interpolate,
     spring,
@@ -23,6 +24,7 @@ interface Overlay {
 interface Scene {
     sceneId: number;
     imagePath: string;
+    videoPath?: string;
     audioPath: string;
     script: string;
     durationInSeconds: number;
@@ -69,7 +71,7 @@ const GET_CHAR_INFO = (charId: string, characters: CharacterMetadata[] = []) => 
 };
 
 // Persistent Header Overlay (Top-Center, Always Visible)
-const HEADER_HEIGHT = 280;
+const HEADER_HEIGHT = 360;
 
 const PersistentHeader: React.FC<{ title: VideoTitle }> = ({ title }) => {
     if (!title) return null;
@@ -96,10 +98,10 @@ const PersistentHeader: React.FC<{ title: VideoTitle }> = ({ title }) => {
             backgroundColor: '#000',
             display: 'flex',
             flexDirection: 'column',
-            justifyContent: 'center',
+            justifyContent: 'flex-end',
             alignItems: 'center',
             zIndex: 150,
-            padding: '0 40px',
+            padding: '0 40px 40px 40px',
             textAlign: 'center'
         }}>
             {/* Top Line (Yellow) */}
@@ -147,8 +149,8 @@ const SubjectLabel: React.FC<{ subject: string }> = ({ subject }) => {
     return (
         <div style={{
             position: 'absolute',
-            top: HEADER_HEIGHT + 20,
-            right: 30,
+            top: HEADER_HEIGHT + 48,
+            right: 110,
             zIndex: 160,
         }}>
             <div style={{
@@ -272,7 +274,7 @@ const StyledSubtitle: React.FC<{
     const visibleText = cleanText.slice(0, visibleChars);
 
     return (
-        <div style={{ textAlign: "left", width: '100%' }}>
+        <div style={{ textAlign: "left", width: '100%', paddingLeft: 56 }}>
             {/* Main subtitle text (Centered-Left) */}
             <div
                 style={{
@@ -285,7 +287,7 @@ const StyledSubtitle: React.FC<{
                     fontFamily: "'Noto Sans CJK KR', 'NanumGothic', sans-serif",
                     letterSpacing: -1,
                     wordBreak: "keep-all" as const,
-                    maxWidth: '85%',
+                    maxWidth: '78%',
                     borderLeft: '10px solid #d4ff00',
                     paddingLeft: 24,
                 }}
@@ -395,38 +397,36 @@ const SceneComponent: React.FC<{
     scene: Scene;
     characters: CharacterMetadata[];
     fullNarrationPath?: string;
-}> = ({ scene, characters, fullNarrationPath }) => {
+    isFirstScene: boolean;
+    isLastScene: boolean;
+}> = ({ scene, characters, fullNarrationPath, isFirstScene, isLastScene }) => {
     const frame = useCurrentFrame();
     const { fps, durationInFrames } = useVideoConfig();
     const charInfo = GET_CHAR_INFO(scene.characterId, characters);
 
-    // Get motion config - handle comma-separated motions by using first one
-    const primaryMotion = scene.motion.split(",")[0].trim();
-    const motionConfig = MOTION_CONFIGS[primaryMotion] || MOTION_CONFIGS.talking;
+    // Image motion is intentionally disabled here.
+    // Scene images may already be converted to per-scene video clips by agy;
+    // Remotion should keep the visual layer static and only add the header/subtitles.
+    const scale = 1;
+    const translateX = 0;
+    const translateY = 0;
 
-    // Ken Burns: smooth zoom + pan over the scene duration
-    const progress = interpolate(frame, [0, durationInFrames], [0, 1], {
-        extrapolateLeft: "clamp",
-        extrapolateRight: "clamp",
-    });
+    // Avoid per-scene black flashes by limiting fades to the video edges only.
+    const fadeIn = isFirstScene
+        ? interpolate(frame, [0, 6], [0, 1], {
+            extrapolateLeft: "clamp",
+            extrapolateRight: "clamp",
+        })
+        : 1;
 
-    const scale = interpolate(progress, [0, 1], [motionConfig.startScale, motionConfig.endScale]);
-    const translateX = interpolate(progress, [0, 1], [motionConfig.startX, motionConfig.endX]);
-    const translateY = interpolate(progress, [0, 1], [motionConfig.startY, motionConfig.endY]);
-
-    // Fade in at start
-    const fadeIn = interpolate(frame, [0, 10], [0, 1], {
-        extrapolateLeft: "clamp",
-        extrapolateRight: "clamp",
-    });
-
-    // Fade out at end
-    const fadeOut = interpolate(
-        frame,
-        [durationInFrames - 10, durationInFrames],
-        [1, 0],
-        { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-    );
+    const fadeOut = isLastScene
+        ? interpolate(
+            frame,
+            [Math.max(0, durationInFrames - 6), durationInFrames],
+            [1, 0],
+            { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+        )
+        : 1;
 
     const opacity = Math.min(fadeIn, fadeOut);
 
@@ -466,9 +466,9 @@ const SceneComponent: React.FC<{
                     style={{
                         position: 'absolute',
                         top: 28,
-                        left: 28,
-                        right: 28,
-                        bottom: 240,
+                        left: 80,
+                        right: 80,
+                        bottom: 440,
                         borderRadius: 28,
                         boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
                         background: '#0f1720',
@@ -492,14 +492,27 @@ const SceneComponent: React.FC<{
                             height: '100%',
                             transform: `scale(${scale}) translate(${translateX}px, ${translateY}px)`,
                         }}>
-                            <Img
-                                src={scene.imagePath ? staticFile(scene.imagePath) : ""}
-                                style={{
-                                    width: "100%",
-                                    height: "100%",
-                                    objectFit: "cover",
-                                }}
-                            />
+                            {scene.videoPath ? (
+                                <Video
+                                    src={staticFile(scene.videoPath)}
+                                    muted
+                                    loop
+                                    style={{
+                                        width: "100%",
+                                        height: "100%",
+                                        objectFit: "cover",
+                                    }}
+                                />
+                            ) : (
+                                <Img
+                                    src={scene.imagePath ? staticFile(scene.imagePath) : ""}
+                                    style={{
+                                        width: "100%",
+                                        height: "100%",
+                                        objectFit: "cover",
+                                    }}
+                                />
+                            )}
                         </div>
 
                         <div
@@ -537,9 +550,9 @@ const SceneComponent: React.FC<{
                         bottom: 0,
                         justifyContent: "flex-end",
                         alignItems: "flex-start",
-                        paddingBottom: 82,
-                        paddingLeft: 40,
-                        paddingRight: 40,
+                        paddingBottom: 310,
+                        paddingLeft: 88,
+                        paddingRight: 28,
                         display: 'flex',
                         flexDirection: 'column'
                     }}
@@ -566,9 +579,9 @@ const SceneComponent: React.FC<{
                     <div key={i} style={{
                         position: 'absolute',
                         top: HEADER_HEIGHT + 28,
-                        left: 28,
-                        right: 28,
-                        bottom: 240,
+                        left: 80,
+                        right: 80,
+                        bottom: 440,
                         pointerEvents: 'none'
                     }}>
                         <ImageOverlay overlay={ov} />
@@ -606,12 +619,6 @@ export const ShortsVideo: React.FC<ShortsVideoProps> = (props) => {
                 <Audio src={staticFile(sceneData.fullNarrationPath)} volume={1.2} />
             )}
 
-            {/* Persistent Header (Top-center, Always Visible) */}
-            <PersistentHeader title={sceneData.videoTitle} />
-
-            {/* Dynamic Subject Label (Top-right, Always Visible) */}
-            <SubjectLabel subject={sceneData.subject || ""} />
-
             {sceneData.scenes.map((scene: Scene, index: number) => {
                 const durationFrames = Math.ceil(scene.durationInSeconds * fps);
                 const startFrame = currentFrame;
@@ -628,10 +635,18 @@ export const ShortsVideo: React.FC<ShortsVideoProps> = (props) => {
                             scene={scene}
                             characters={sceneData.characters}
                             fullNarrationPath={sceneData.fullNarrationPath}
+                            isFirstScene={index === 0}
+                            isLastScene={index === sceneData.scenes.length - 1}
                         />
                     </Sequence>
                 );
             })}
+
+            {/* Persistent overlays must be rendered after scene sequences so they stay above scene fills. */}
+            <div style={{ position: 'absolute', inset: 0, zIndex: 1000, pointerEvents: 'none' }}>
+                <PersistentHeader title={sceneData.videoTitle} />
+                <SubjectLabel subject={sceneData.subject || ""} />
+            </div>
         </AbsoluteFill>
     );
 };

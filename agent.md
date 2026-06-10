@@ -7,7 +7,7 @@
 ## 1. 프로젝트 한줄 요약
 
 사용자가 웹 UI에서 주제와 방향을 입력하고 장면 수(8/10/12)를 선택하면,
-Gemini로 쇼츠 대본을 생성하고 → Imagen으로 장면 이미지를 만들고 → Supertonic 로컬 TTS로 한국어 나레이션을 생성한 뒤 → Remotion/FFmpeg로 1080×1920 MP4를 렌더링하는 FastAPI 웹앱이다.
+호스트의 agy 워커로 쇼츠 대본/이미지를 생성하고 → Supertonic 로컬 TTS로 한국어 나레이션을 생성한 뒤 → Remotion/FFmpeg로 1080×1920 MP4를 렌더링하는 FastAPI 웹앱이다.
 
 ---
 
@@ -18,7 +18,7 @@ Gemini로 쇼츠 대본을 생성하고 → Imagen으로 장면 이미지를 만
 | Backend | Python 3.9, FastAPI, Pydantic v2, Uvicorn |
 | Frontend | 정적 HTML/CSS/Vanilla JS |
 | Video Engine | Remotion v4, React 19, TypeScript, Node.js 20 |
-| 대본/이미지 AI | Google Gemini 2.0 Flash (대본), gemini-2.5-flash-image (이미지) |
+| 대본/이미지 AI | **host-side agy workers** (`scripts/agy_text_worker.py`, `scripts/agy_image_worker.py`) |
 | TTS | **Supertonic 로컬 ONNX TTS** (on-device, 한국어 전용) |
 | Auth | JWT Bearer token, bcrypt |
 | 배포 | Docker Compose, nginx 리버스 프록시 (포트 80→8000) |
@@ -37,8 +37,9 @@ Gemini로 쇼츠 대본을 생성하고 → Imagen으로 장면 이미지를 만
 │   ├── config.py                  # .env 로드, API 키/경로/영상 설정
 │   ├── api/routes.py              # 모든 HTTP API + 비디오 생성 파이프라인 오케스트레이션
 │   └── services/
-│       ├── script_generator.py    # Gemini 검색 → 대본/메타데이터 생성
-│       ├── image_generator.py     # Imagen 장면 이미지 생성 + 이미지 캐시
+│       ├── script_generator.py    # agy 텍스트 워커 → 대본/메타데이터 생성
+│       ├── agy_text_client.py     # Docker↔호스트 agy 텍스트 요청 브리지
+│       ├── image_generator.py     # agy 이미지 워커 요청 + 이미지 캐시
 │       ├── narration_generator.py # TTS 호출, 볼륨 정규화, 속도 보정, Duration Guard
 │       ├── supertonic_local_service.py  # Supertonic ONNX TTS 엔진 (싱글턴)
 │       ├── google_tts_service.py  # Chirp3 voice 이름 매핑 (Supertonic style key로 변환)
@@ -74,10 +75,15 @@ Gemini로 쇼츠 대본을 생성하고 → Imagen으로 장면 이미지를 만
 루트 `.env`를 `backend/config.py`와 `backend/services/auth_service.py`가 읽는다.
 
 ```env
-GOOGLE_GEMINI_API=...              # Gemini + Imagen API 키
-ELEVENLABS_API_KEY=...             # 현재 사용 안 함 (Supertonic으로 대체), 하지만 config.py가 require
+# 대본/이미지는 Gemini API가 아니라 host-side agy worker를 사용한다.
+# GOOGLE_GEMINI_API / GCP 관련 값은 있더라도 사용하지 않으며 필수도 아니다.
+ELEVENLABS_API_KEY=...             # config 호환성용 필수 값
 SUPER_TONE_API_KEY=...             # 현재 사용 안 함 (로컬 모델 사용)
-GOOGLE_APPLICATION_CREDENTIALS=./google_cloud_key.json
+IMAGE_PROVIDER=agy                 # auto/google 값도 agy로 매핑됨
+AGY_TEXT_TIMEOUT=300
+AGY_TEXT_REQUEST_TIMEOUT=360
+AGY_IMAGE_TIMEOUT=180
+AGY_IMAGE_REQUEST_TIMEOUT=240
 MASTER_PASSWORD_HASH=$2b$12$...    # bcrypt 해시 (generate_password.py로 생성)
 SECRET_KEY=...                     # JWT 서명 키
 REMOTION_CODEC=h264
@@ -141,15 +147,14 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000
 로그인 (JWT 발급)
   ↓
 POST /api/generate-script
-  → Google Search grounding으로 주제 조사 (research_topic)
-  → Gemini 2.0 Flash로 대본 JSON 생성 (최대 2회 retry)
-  → 발화량·제목 품질 검증 → 메타데이터 보강
+  → agy_text_worker가 대본용 참고자료/대본 JSON 생성 (최대 2회 retry)
+  → 발화량·제목 품질 검증 → agy_text_worker로 메타데이터 보강
   ↓
 프론트에서 대본/장면/이미지 오버레이 편집
   ↓
 POST /api/generate-video  (백그라운드 작업 시작)
   ↓ (background task)
-  [Step 2] generate_scene_image() × N — Imagen으로 각 장면 이미지 생성 (캐시 활용)
+  [Step 2] generate_scene_image() × N — agy_image_worker로 각 장면 이미지 생성 (캐시 활용)
   [Step 3] generate_all_narrations() — Supertonic 로컬 TTS → 볼륨 정규화 → Duration Guard
   [Step 4] compose_video() — scene-data.json 작성 → Remotion 렌더 → FFmpeg fallback
   ↓

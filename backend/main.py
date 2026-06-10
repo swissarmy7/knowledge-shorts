@@ -39,10 +39,17 @@ async def serve_frontend():
     return FileResponse(str(FRONTEND_DIR / "index.html"))
 
 
+@app.get("/ssul_shorts")
+@app.get("/ssul_shorts/")
+async def serve_ssul_shorts():
+    return FileResponse(str(FRONTEND_DIR / "ssul_shorts" / "index.html"))
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
 
 # Mount frontend static files (CSS, JS) - must be last
-app.mount("/", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend")
+# Enabled html=True to naturally serve subdirectory index.html files
+app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

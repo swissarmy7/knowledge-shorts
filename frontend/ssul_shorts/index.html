@@ -4,10 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shorts Studio - AI 지식 쇼츠</title>
-    <meta name="description" content="유튜브 지식 쇼츠 자동 생성 스튜디오">
+    <title>Shorts Studio - AI 썰 쇼츠</title>
+    <meta name="description" content="유튜브 썰 쇼츠 자동 생성 스튜디오">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=4">
+    <link rel="stylesheet" href="style.css?v=5">
     <script>
         (function() {
             if (localStorage.getItem('auth_token')) {
@@ -38,10 +38,10 @@
                 <button class="menu-btn" id="menu-btn">☰</button>
                 <!-- Menu Dropdown -->
                 <div id="menu-dropdown" class="menu-dropdown hidden">
-                    <a href="/" class="menu-dropdown-item active">
+                    <a href="/" class="menu-dropdown-item">
                         <span class="menu-item-icon">💡</span> 지식 쇼츠
                     </a>
-                    <a href="/ssul_shorts/" class="menu-dropdown-item">
+                    <a href="/ssul_shorts/" class="menu-dropdown-item active">
                         <span class="menu-item-icon">🔥</span> 썰 쇼츠
                     </a>
                 </div>
@@ -52,8 +52,8 @@
             </div>
             <div class="header-center" style="display: none;">
                 <div class="header-tabs">
-                    <a href="/" class="tab-item active">💡 지식 쇼츠</a>
-                    <a href="/ssul_shorts/" class="tab-item">🔥 썰 쇼츠</a>
+                    <a href="/" class="tab-item">💡 지식 쇼츠</a>
+                    <a href="/ssul_shorts/" class="tab-item active">🔥 썰 쇼츠</a>
                 </div>
             </div>
             <div class="header-right">
@@ -70,11 +70,11 @@
             <!-- STEP 1: Topic Input -->
             <section id="input-step" class="step-container active">
                 <div class="focused-input-card">
-                    <h2>어떤 쇼츠를 만들까요?</h2>
-                    <p class="step-desc">주제를 입력하면 AI가 대본과 영상을 기획합니다.</p>
+                    <h2>어떤 썰을 만들까요?</h2>
+                    <p class="step-desc">이야기 주제를 입력하면 AI가 재미있는 썰 대본과 영상을 기획합니다.</p>
                     
                     <div class="yt-search-box">
-                        <input type="text" id="topic-input" placeholder="예: 비트코인이 1억을 돌파한 진짜 이유" autocomplete="off">
+                        <input type="text" id="topic-input" placeholder="예: 조선시대 양반들이 비밀리에 즐겼던 충격적인 야간 놀이 문화" autocomplete="off">
                     </div>
                     
                     <div class="advanced-options">
@@ -92,16 +92,11 @@
                             </div>
                         </div>
 
-                        <div class="scene-selector-group hidden" style="margin-top: 16px; display: none;">
-                            <label>비주얼 스타일</label>
-                            <div class="visual-style-toggle" id="visual-style-selector">
-                                <button type="button" class="visual-style-option active" data-style="south-park-comic">🧢 사우스파크 만화 기본</button>
-                            </div>
-                        </div>
+
 
                         <!-- TTS Voice Custom Settings -->
                         <div class="scene-selector-group" style="margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 16px;">
-                            <label style="color: var(--accent-yellow); font-weight: 700; margin-bottom: 12px; display: block;">🎙️ 지식 맞춤 나레이션 설정</label>
+                            <label style="color: var(--accent-yellow); font-weight: 700; margin-bottom: 12px; display: block;">🎙️ 썰 맞춤 나레이션 설정</label>
                             
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
                                 <div>
@@ -180,15 +175,21 @@
 
                             <!-- Voice Setting Section -->
                             <div class="metadata-card" style="margin-top: 16px; margin-bottom: 16px;">
-                                <div class="editor-label">🎙️ 나레이션 목소리 설정</div>
+                                <div class="editor-label">🎙️ 나레이션 목소리 및 속도 설정</div>
                                 <div class="title-inputs" style="display: grid; gap: 10px;">
                                     <label class="title-field">
                                         <span>성별 및 목소리 톤</span>
                                         <select id="voice-gender-select" onchange="handleVoiceChange()" style="background: #1a1a1a; border: 1px solid #333; border-radius: 4px; padding: 9px 12px; color: #fff; font-size: 13px; outline: none; cursor: pointer;">
-                                            <option value="male_young">🧑 유쾌한 청년 남성 (M2 - 기본값)</option>
-                                            <option value="male_warm">👨‍🏫 따뜻한 중년 남성 (M1)</option>
-                                            <option value="female_young">👧 발랄한 청년 여성 (F2)</option>
-                                            <option value="female_calm">👩‍🏫 차분한 중년 여성 (F1)</option>
+                                            <option value="M2">🧑 청년 남성 - 밝고 활기찬 톤 (M2)</option>
+                                            <option value="M3">🧑 청년 남성 - 차분하고 진지한 톤 (M3)</option>
+                                            <option value="M4">🧑 청년 남성 - 어둡고 미스터리한 톤 (M4)</option>
+                                            <option value="M1">👨‍🏫 중년 남성 - 따뜻하고 신뢰감 있는 톤 (M1)</option>
+                                            <option value="M5">👦 아동 남성 - 귀엽고 개구진 톤 (M5)</option>
+                                            <option value="F2">👧 청년 여성 - 발랄하고 유쾌한 톤 (F2)</option>
+                                            <option value="F1">👩‍🏫 중년 여성 - 이지적이고 차분한 톤 (F1)</option>
+                                            <option value="F3">👧 청년 여성 - 차갑고 신비로운 톤 (F3)</option>
+                                            <option value="F4">👩 중년 여성 - 미스터리하고 묵직한 톤 (F4)</option>
+                                            <option value="F5">👧 아동 여성 - 귀엽고 아기자기한 톤 (F5)</option>
                                         </select>
                                     </label>
 
@@ -229,9 +230,6 @@
                         </div>
 
                         <div class="frame-footer">
-                            <button id="generate-all-images-btn" class="btn-secondary btn-full" style="margin-bottom: 10px;">
-                                🎨 부족한 장면 이미지 생성
-                            </button>
                             <button id="confirm-generate-btn" class="btn-primary btn-full">
                                 🎬 최종 영상 생성하기
                             </button>
@@ -258,6 +256,8 @@
                                 <div class="pipeline-list">
                                     <div class="pipe-item" data-step="script">📝 스크립트</div>
                                     <div class="pipe-item" data-step="images">🎨 이미지</div>
+                                    <div class="pipe-item" data-step="narration">🎙️ 나레이션</div>
+                                    <div class="pipe-item" data-step="video">🎬 합성</div>
                                 </div>
                             </div>
 
@@ -317,7 +317,7 @@
     <!-- Background Decoration -->
     <div class="yt-bg-blob"></div>
 
-    <script src="app.js?v=28"></script>
+    <script src="app.js?v=12"></script>
 </body>
 
 </html>

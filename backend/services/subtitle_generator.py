@@ -27,8 +27,9 @@ def generate_subtitles(
     srt_content = ""
     current_time = 0.0
 
+    import re
     for i, (scene, duration) in enumerate(zip(scenes, durations)):
-        script = scene["script"]
+        script = re.sub(r'\([^)]*\)', '', scene["script"]).strip()
         
         # Actual audio duration might be less than scene duration (due to 0.4s buffer)
         # We want the subtitle to end when the audio ends, or slightly before.
